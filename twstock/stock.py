@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
 
+import sys
 import datetime
 import urllib.parse
-from collections import namedtuple
-
+import time
+import os
 from twstock.proxy import get_proxies
+import pandas as pd
+from threading import Lock
+from collections import namedtuple
+from twstock.proxy import get_proxies
+import talib
+from talib import MA_Type
 
 try:
     from json.decoder import JSONDecodeError
@@ -24,202 +31,295 @@ except ImportError as e:
     from codes import codes
 
 
-TWSE_BASE_URL = 'http://www.twse.com.tw/'
-TPEX_BASE_URL = 'http://www.tpex.org.tw/'
-DATATUPLE = namedtuple('Data', ['date', 'capacity', 'turnover', 'open',
-                                'high', 'low', 'close', 'change', 'transaction'])
-
+WANTGOO_BASE_URL = 'https://www.wantgoo.com/'
+DATATUPLE = namedtuple('Data', ['date', 'volume', 'open', 'high', 'low', 'close'])
 
 class BaseFetcher(object):
     def fetch(self, year, month, sid, retry):
         pass
 
-    def _convert_date(self, date):
-        """Convert '106/05/01' to '2017/05/01'"""
-        return '/'.join([str(int(date.split('/')[0]) + 1911)] + date.split('/')[1:])
-
     def _make_datatuple(self, data):
         pass
 
     def purify(self, original_data):
         pass
 
+class WantgooFetcher(BaseFetcher):
+    REPORT_URL = WANTGOO_BASE_URL
+    HEADERS = {'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.183 Safari/537.36'}
 
-class TWSEFetcher(BaseFetcher):
-    REPORT_URL = urllib.parse.urljoin(
-        TWSE_BASE_URL, 'exchangeReport/STOCK_DAY')
-
-    def __init__(self):
-        pass
-
-    def fetch(self, year: int, month: int, sid: str, retry: int=5):
-        params = {'date': '%d%02d01' % (year, month), 'stockNo': sid}
+    def fetch(self, sid: str, num: int, retry: int=5):
+        params = {'before': int(time.mktime(datetime.datetime.now().timetuple()))*1000, 'top': num}
         for retry_i in range(retry):
-            r = requests.get(self.REPORT_URL, params=params,
-                             proxies=get_proxies())
+            candlesticks_response = requests.get(
+                self.REPORT_URL + 'investrue/' + sid + '/historical-daily-candlesticks',
+                params = params,
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
+            institutional_investors_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/institutional-investors/investment-trust/historical-net-buy-sell',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
             try:
-                data = r.json()
+                candlesticks = candlesticks_response.json()[::-1]
+                institutional_investors = institutional_investors_response.json()[::-1]
             except JSONDecodeError:
                 continue
             else:
                 break
         else:
             # Fail in all retries
-            data = {'stat': '', 'data': []}
+            print(sid + 'fail')
+            candlesticks = []
+            institutional_investors = []
 
-        if data['stat'] == 'OK':
-            data['data'] = self.purify(data)
-        else:
-            data['data'] = []
-        return data
+        return self.purify(candlesticks, institutional_investors)
 
-    def _make_datatuple(self, data):
-        data[0] = datetime.datetime.strptime(
-            self._convert_date(data[0]), '%Y/%m/%d')
-        data[1] = int(data[1].replace(',', ''))
-        data[2] = int(data[2].replace(',', ''))
-        data[3] = None if data[3] == '--' else float(data[3].replace(',', ''))
-        data[4] = None if data[4] == '--' else float(data[4].replace(',', ''))
-        data[5] = None if data[5] == '--' else float(data[5].replace(',', ''))
-        data[6] = None if data[6] == '--' else float(data[6].replace(',', ''))
-        # +/-/X表示漲/跌/不比價
-        data[7] = float(0.0 if data[7].replace(',', '') ==
-                        'X0.00' else data[7].replace(',', ''))
-        data[8] = int(data[8].replace(',', ''))
-        return DATATUPLE(*data)
+    def purify(self, candlesticks, institutional_investors):
+        candlesticks_data = pd.DataFrame(candlesticks, columns=['volume', 'open', 'close', 'high', 'low'])
+        institutional_investors_data = pd.DataFrame(institutional_investors, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "institutional_investors"})
+        candlesticks_data['date'] = [datetime.datetime.fromtimestamp(d['tradeDate']/1000) for d in candlesticks]
+        institutional_investors_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in institutional_investors]
+        institutional_investors_data['institutional_investors']
 
-    def purify(self, original_data):
-        return [self._make_datatuple(d) for d in original_data['data']]
+        data = pd.merge(candlesticks_data, institutional_investors_data, how='left', on=['date'])
+        data['institutional_investors'] = data['institutional_investors'].fillna(0.0)
 
+        return data[['date', 'volume', 'open', 'close', 'high', 'low', 'institutional_investors']]
 
-class TPEXFetcher(BaseFetcher):
-    REPORT_URL = urllib.parse.urljoin(TPEX_BASE_URL,
-                                      'web/stock/aftertrading/daily_trading_info/st43_result.php')
-
-    def __init__(self):
-        pass
-
-    def fetch(self, year: int, month: int, sid: str, retry: int=5):
-        params = {'d': '%d/%d' % (year - 1911, month), 'stkno': sid}
+    def getAllStockList(self, retry: int=5):
         for retry_i in range(retry):
-            r = requests.get(self.REPORT_URL, params=params,
-                             proxies=get_proxies())
+            r = requests.get(self.REPORT_URL+'investrue/all-alive',
+                headers = self.HEADERS,
+                proxies=get_proxies()
+                )
             try:
                 data = r.json()
             except JSONDecodeError:
+                print('error')
                 continue
             else:
                 break
         else:
             # Fail in all retries
-            data = {'aaData': []}
+            print('fail')
+            data = []
 
-        data['data'] = []
-        if data['aaData']:
-            data['data'] = self.purify(data)
-        return data
-
-    def _convert_date(self, date):
-        """Convert '106/05/01' to '2017/05/01'"""
-        return '/'.join([str(int(date.split('/')[0]) + 1911)] + date.split('/')[1:])
-
-    def _make_datatuple(self, data):
-        data[0] = datetime.datetime.strptime(self._convert_date(data[0].replace('＊', '')),
-                                             '%Y/%m/%d')
-        data[1] = int(data[1].replace(',', '')) * 1000
-        data[2] = int(data[2].replace(',', '')) * 1000
-        data[3] = None if data[3] == '--' else float(data[3].replace(',', ''))
-        data[4] = None if data[4] == '--' else float(data[4].replace(',', ''))
-        data[5] = None if data[5] == '--' else float(data[5].replace(',', ''))
-        data[6] = None if data[6] == '--' else float(data[6].replace(',', ''))
-        data[7] = float(data[7].replace(',', ''))
-        data[8] = int(data[8].replace(',', ''))
-        return DATATUPLE(*data)
-
-    def purify(self, original_data):
-        return [self._make_datatuple(d) for d in original_data['aaData']]
-
+        filtered = filter(lambda l: l['type'] in ['Stock'], data)
+        sids = map(lambda l: l['id'], filtered)
+        return list(sids)
 
 class Stock(analytics.Analytics):
-
-    def __init__(self, sid: str, initial_fetch: bool=True):
+    def __init__(self, sid: str, load_data: bool=True):
         self.sid = sid
-        self.fetcher = TWSEFetcher(
-        ) if codes[sid].market == '上市' else TPEXFetcher()
-        self.raw_data = []
-        self.data = []
+        self.fetcher = WantgooFetcher()
+        self.path = "data/" + self.sid + ".csv"
 
-        # Init data
-        if initial_fetch:
-            self.fetch_31()
+        if load_data:
+            if os.path.isfile(self.path):
+                self.read_csv(self.path)
+            else:
+                self.fetch(490)
+                self.to_csv(self.path)
 
-    def _month_year_iter(self, start_month, start_year, end_month, end_year):
-        ym_start = 12 * start_year + start_month - 1
-        ym_end = 12 * end_year + end_month
-        for ym in range(ym_start, ym_end):
-            y, m = divmod(ym, 12)
-            yield y, m + 1
+        if len(self.close) == 0:
+            return
 
-    def fetch(self, year: int, month: int):
-        """Fetch year month data"""
-        self.raw_data = [self.fetcher.fetch(year, month, self.sid)]
-        self.data = self.raw_data[0]['data']
-        return self.data
+        self.calc_base()
 
-    def fetch_from(self, year: int, month: int):
-        """Fetch data from year, month to current year month data"""
-        self.raw_data = []
-        self.data = []
-        today = datetime.datetime.today()
-        for year, month in self._month_year_iter(month, year, today.month, today.year):
-            self.raw_data.append(self.fetcher.fetch(year, month, self.sid))
-            self.data.extend(self.raw_data[-1]['data'])
-        return self.data
+    def read_csv(self, path):
+        self.data = pd.read_csv(path,index_col=0,parse_dates=True)
 
-    def fetch_31(self):
-        """Fetch 31 days data"""
-        today = datetime.datetime.today()
-        before = today - datetime.timedelta(days=60)
-        self.fetch_from(before.year, before.month)
-        self.data = self.data[-31:]
-        return self.data
+    def to_csv(self, path):
+        self.data.to_csv(path)
+
+    def getAllStockList(self):
+        return self.fetcher.getAllStockList()
+
+    def fetch(self, num):
+        self.data = self.fetcher.fetch(self.sid, num)
+
+    def calc_change(self, today, yesterday):
+        return round((today-yesterday)/yesterday*100,2)
+
+    def calc_base(self):
+        bollinger_upper, _, bollinger_lower = talib.BBANDS(self.close, 20)
+        k9, d9 = talib.STOCH(self.high, self.low, self.close)
+        macd, macdsignal, macdhist = talib.MACD(self.close)
+
+        change = [0]
+        for i in range(1, len(self.close)):
+            change.append(self.calc_change(self.close[i],self.close[i-1]))
+
+        self.data['bollinger_upper'] = bollinger_upper
+        self.data['bollinger_lower'] = bollinger_lower
+        self.data['change'] = change
+        self.data['ma5'] = talib.MA(self.close, timeperiod=5)
+        self.data['ma10'] = talib.MA(self.close, timeperiod=10)
+        self.data['ma20'] = talib.MA(self.close, timeperiod=20)
+        self.data['ma60'] = talib.MA(self.close, timeperiod=60)
+        self.data['k9'] = k9
+        self.data['d9'] = d9
+        self.data['macd'] = macd
+        self.data['macdsignal'] = macdsignal
+        self.data['macdhist'] = macdhist
+
+        self.calc_trend()
+        self.data = self.data.dropna(how='any')
+
+    def calc_trend(self):
+        high = -sys.maxsize-1
+        low = sys.maxsize
+        is_up = True
+        day = 0
+        wave = []
+        for i in range(0, len(self.ma5)):
+            # wave.append(0)
+            if self.close[i] >= self.ma5[i]:
+                wave.append(1)
+                if is_up is False:
+                    low = sys.maxsize
+                    is_up = True
+                    wave[day] = -2
+                if self.high[i] >= high:
+                    high = self.high[i]
+                    day = i
+            else:
+                wave.append(-1)
+                if is_up is True:
+                    high = -sys.maxsize-1
+                    is_up = False
+                    wave[day] = 2
+                if self.low[i] <= low:
+                    low = self.low[i]
+                    day = i
+
+        if wave[-1] == 1 and is_up is True:
+            wave[-1] = 2
+        if wave[-1] == -1 and is_up is False:
+            wave[-1] = -2
+
+        trend = []
+        high_point = 0
+        low_point = 0
+        high = False
+        low = False
+        for i in range(0, len(wave)):
+            trend.append(0)
+            if wave[i] == 2:
+                if self.high[i] > self.high[high_point]:
+                    high = True
+                    if low is True:
+                        trend[low_point] = -3
+                        low = False
+                else:
+                    low = True
+                    if high is True:
+                        trend[high_point] = 3
+                        high = False
+
+                high_point = i
+
+            if wave[i] == -2:
+                if self.low[i] < self.low[low_point]:
+                    low = True
+                    if high is True:
+                        trend[high_point] = 3
+                        high = False
+                else:
+                    high = True
+                    if low is True:
+                        trend[low_point] = -3
+                        low = False
+
+                low_point = i
+
+        if high is True:
+            trend[high_point] = 3
+        if low is True:
+            trend[low_point] = -3
+
+        for i in range(1, len(trend)):
+            if trend[i] == 0:
+                trend[i] = trend[i-1]
+
+        self.data['wave'] = wave
+        self.data['trend'] = trend
 
     @property
     def date(self):
-        return [d.date for d in self.data]
+        return self.data.date.values
 
     @property
-    def capacity(self):
-        return [d.capacity for d in self.data]
-
-    @property
-    def turnover(self):
-        return [d.turnover for d in self.data]
-
-    @property
-    def price(self):
-        return [d.close for d in self.data]
+    def volume(self):
+        return self.data.volume.values
 
     @property
     def high(self):
-        return [d.high for d in self.data]
+        return self.data.high.values
 
     @property
     def low(self):
-        return [d.low for d in self.data]
+        return self.data.low.values
 
     @property
     def open(self):
-        return [d.open for d in self.data]
+        return self.data.open.values
 
     @property
     def close(self):
-        return [d.close for d in self.data]
+        return self.data.close.values
 
     @property
     def change(self):
-        return [d.change for d in self.data]
+        return self.data.change.values
 
     @property
-    def transaction(self):
-        return [d.transaction for d in self.data]
+    def macd(self):
+        return self.data.macd.values
+
+    @property
+    def macdsignal(self):
+        return self.data.macdsignal.values
+
+    @property
+    def macdhist(self):
+        return self.data.macdhist.values
+
+    @property
+    def ma5(self):
+        return self.data.ma5.values
+
+    @property
+    def ma10(self):
+        return self.data.ma10.values
+
+    @property
+    def ma20(self):
+        return self.data.ma20.values
+
+    @property
+    def bollinger_upper(self):
+        return self.data.bollinger_upper.values
+
+    @property
+    def bollinger_lower(self):
+        return self.data.bollinger_lower.values
+
+    @property
+    def wave(self):
+        return self.data.wave.values
+
+    @property
+    def trend(self):
+        return self.data.trend.values
+
+    @property
+    def k9(self):
+        return self.data.k9.values
+
+    @property
+    def d9(self):
+        return self.data.d9.values

@@ -1,17 +1,61 @@
 # -*- coding: utf-8 -*-
 
+import sys
+import statistics
+import talib
+from talib import MA_Type
+import numpy as np
+from collections import namedtuple
+
+conter_tuple = namedtuple('counter',('index', 'is_up'))
 
 class Analytics(object):
+    length = 3
 
     def continuous(self, data):
-        diff = [1 if data[-i] > data[-i - 1] else -1 for i in range(1, len(data))]
+        diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]
         cont = 0
+        print(diff)
         for v in diff:
             if v == diff[0]:
                 cont += 1
             else:
                 break
+        print(cont)
         return cont * diff[0]
+
+    def pivot_point(self):
+        self.is_up = True
+        conter = []
+
+        diff = []
+        for i in range(1, len(self.close) - 2):
+            if self.pivots[i] == 1:
+                    self.is_up = False
+                    conter.append(conter_tuple(i, self.is_up))
+                    if len(conter) > 1:
+                        diff.append(abs(self.close[conter[-1].index] - self.close[conter[-2].index]))
+            elif self.pivots[i] == -1:
+                    self.is_up = True
+                    conter.append(conter_tuple(i, self.is_up))
+                    if len(conter) > 1:
+                        diff.append(abs(self.close[conter[-1].index] - self.close[conter[-2].index]))
+                    if len(diff) > 3:
+                        if diff[-1] > diff[-2]/2 and diff[-1] > 10:
+                            print(self.date[i], "N")
+            # else:
+
+
+        # print(conter)
+
+        # for i in range(0, len(conter) - 1):
+        #     diff.append(abs(self.close[conter[i+1].index] - self.close[conter[i].index]))
+        #     print(self.date[conter[i].index], self.date[conter[i+1].index], conter[i].is_up ,diff[i])
+
+        #     if i > 3 and conter[i].is_up is True:
+        #         if diff[i] > diff[i-1]/2 and diff[i] > 10:
+        #             print(self.date[conter[i+1].index], "N")
+        #         print(diff[i], diff[i-1], diff[i-2], diff[i-3])
 
     def moving_average(self, data, days):
         result = []
@@ -23,8 +67,8 @@ class Analytics(object):
 
     def ma_bias_ratio(self, day1, day2):
         """Calculate moving average bias ratio"""
-        data1 = self.moving_average(self.price, day1)
-        data2 = self.moving_average(self.price, day2)
+        data1 = self.moving_average(self.close, day1)
+        data2 = self.moving_average(self.close, day2)
         result = [data1[-i] - data2[-i] for i in range(1, min(len(data1), len(data2)) + 1)]
 
         return result[::-1]
@@ -45,6 +89,96 @@ class Analytics(object):
                 sample_size - sample.index(check_value) - 1,
                 check_value)
 
+    def up_three_line(self):
+        three_line = []
+        for i in range(1, len(self.close) - 1):
+            sub = (max(self.ma5[-i] , self.ma10[-i], self.ma20[-i]) - min(self.ma5[-i] , self.ma10[-i], self.ma20[-i]))
+            avg = statistics.mean([self.ma5[-i], self.ma10[-i], self.ma20[-i]])
+            if avg == 0:
+                return None
+
+            three_line.append(sub/avg)
+
+        three_line = three_line[::-1]
+
+        for i in range(2, self.length):
+            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
+            if self.volume[-i+1] > 1000 and self.volume[-i+1] > self.volume[-i] * 2:
+                if self.change[-i+1] > 3 and self.close[-i+1] > self.open[-i+1]:
+                        if self.close[-i+1] < 20:
+                            if three_line[-i] <= 0.03:
+                                print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
+                                return (self.sid, self.date[-i+1], '三線合一向上')
+                        else:
+                            if three_line[-i] <= 0.05:
+                                print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
+                                return (self.sid, self.date[-i+1], '三線合一向上')
+
+    def up_jump_line(self):
+        for i in range(2, self.length):
+            if self.volume[-i+1] > 300 and self.volume[-i+1] > self.volume[-i] * 2:
+                if self.change[-i+1] > 3 and self.close[-i+1] > self.open[-i+1]:
+                    if self.low[-i+1] > self.high[-i]:
+                        print(self.sid, self.date[-i+1], '跳空向上')
+                        return (self.sid, self.date[-i+1], '跳空向上')
+
+    def down_jump_line(self):
+        for i in range(2, self.length):
+                if self.change[-i+1] < -3 and self.close[-i+1] < self.open[-i+1]:
+                    if self.high[-i+1] < self.low[-i]:
+                        print(self.sid, self.date[-i+1], '跳空向下')
+                        return (self.sid, self.date[-i+1], '跳空向下')
+
+    def up_macd(self):
+        for i in range(2, self.length):
+            if self.macdsignal[-i+1] > 0 and self.macd[-i+1] > 0:
+                if self.change[-i+1] > 0 and self.close[-i+1] > self.open[-i+1]:
+                    if self.macdsignal[-i+1] > self.macdsignal[-i] and self.macd[-i+1] > self.macd[-i]:
+                        if self.macdsignal[-i+1] > 0 and self.macdsignal[-i] < 0:
+                            print(self.sid, self.date[-i+1], '站上MACD')
+                            return (self.sid, self.date[-i+1], '站上MACD')
+
+    def up_kd(self):
+        for i in range(2, self.length):
+            if self.k9[-i+1] < 20 and self.d9[-i+1] < 20:
+                if self.change[-i+1] > 0:
+                    if self.k9[-i+1] > self.k9[-i]:
+                        if self.k9[-i+1] > self.d9[-i+1] and self.k9[-i] < self.d9[-i]:
+                            print(self.sid, self.date[-i+1], 'KD20向上')
+                            return (self.sid, self.date[-i+1], 'KD20向上')
+
+    def up_bollinger(self):
+        if len(self.bollinger_upper) > 10:
+            for i in range(2, self.length):
+                bollinger_dif = self.bollinger_upper[-i]/self.bollinger_lower[-i] - 1
+                if bollinger_dif < 0.07:
+                    if self.volume[-i+1] > 300 and self.volume[-i+1] > self.volume[-i] * 2:
+                        if self.close[-i+1] > self.open[-i+1]:
+                            if self.close[-i+1] > self.bollinger_upper[-i+1]:
+                                print(self.sid, self.date[-i+1], self.change[-i+1], self.bollinger_upper[-i+1], 'up_bollinger')
+                                return (self.sid, self.date[-i+1], '站上布林通道')
+
+    def long_up(self):
+        for i in range(2, self.length):
+            if self.change[-i+1] > 3:
+                if self.close[-i+1] > self.open[-i+1] and self.close[-i] < self.open[-i]:
+                    if self.close[-i] > self.open[-i+1] and self.open[-i] < self.close[-i+1]:
+                        print(self.sid, self.date[-i+1], self.change[-i+1], '長紅吞噬')
+                        return (self.sid, self.date[-i+1], '長紅吞噬')
+
+    def long_down(self):
+        for i in range(2, self.length):
+            if self.change[-i+1] < -3:
+                if self.close[-i+1] < self.open[-i+1] and self.close[-i] > self.open[-i]:
+                    if self.close[-i] < self.open[-i+1] and self.open[-i] > self.close[-i+1]:
+                        print(self.sid, self.date[-i+1], self.change[-i+1], '長黑吞噬')
+                        return (self.sid, self.date[-i+1], '長黑吞噬')
+    
+    def continuous_days(self):
+        days = self.continuous(self.wave)
+        print(self.sid, days, '趨勢天數')
+        if days > 5:
+            return (self.sid, self.date[-1], days)
 
 class BestFourPoint(object):
     BEST_BUY_WHY = ['量大收紅', '量縮價不跌', '三日均價由下往上', '三日均價大於六日均價']
