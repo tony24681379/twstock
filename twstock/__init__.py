@@ -10,5 +10,6 @@ from twstock.analytics import BestFourPoint
 from twstock.codes import __update_codes, twse, tpex, codes
 from twstock.stock import Stock
 from twstock.stock import WantgooFetcher
+from twstock.all import All
 
 __version__ = '1.3.1'
