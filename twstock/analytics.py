@@ -65,34 +65,34 @@ class BestFourPoint(object):
         return self.bias_ratio(False)
 
     def best_buy_1(self):
-        return (self.stock.capacity[-1] > self.stock.capacity[-2] and
-                self.stock.price[-1] > self.stock.open[-1])
+        return (self.stock.volume[-1] > self.stock.volume[-2] and
+                self.stock.close[-1] > self.stock.open[-1])
 
     def best_buy_2(self):
-        return (self.stock.capacity[-1] < self.stock.capacity[-2] and
-                self.stock.price[-1] > self.stock.open[-2])
+        return (self.stock.volume[-1] < self.stock.volume[-2] and
+                self.stock.close[-1] > self.stock.open[-2])
 
     def best_buy_3(self):
-        return self.stock.continuous(self.stock.moving_average(self.stock.price, 3)) == 1
+        return self.stock.continuous(self.stock.moving_average(self.stock.close, 3)) == 1
 
     def best_buy_4(self):
-        return (self.stock.moving_average(self.stock.price, 3)[-1] >
-                self.stock.moving_average(self.stock.price, 6)[-1])
+        return (self.stock.moving_average(self.stock.close, 3)[-1] >
+                self.stock.moving_average(self.stock.close, 6)[-1])
 
     def best_sell_1(self):
-        return (self.stock.capacity[-1] > self.stock.capacity[-2] and
-                self.stock.price[-1] < self.stock.open[-1])
+        return (self.stock.volume[-1] > self.stock.volume[-2] and
+                self.stock.close[-1] < self.stock.open[-1])
 
     def best_sell_2(self):
-        return (self.stock.capacity[-1] < self.stock.capacity[-2] and
-                self.stock.price[-1] < self.stock.open[-2])
+        return (self.stock.volume[-1] < self.stock.volume[-2] and
+                self.stock.close[-1] < self.stock.open[-2])
 
     def best_sell_3(self):
-        return self.stock.continuous(self.stock.moving_average(self.stock.price, 3)) == -1
+        return self.stock.continuous(self.stock.moving_average(self.stock.close, 3)) == -1
 
     def best_sell_4(self):
-        return (self.stock.moving_average(self.stock.price, 3)[-1] <
-                self.stock.moving_average(self.stock.price, 6)[-1])
+        return (self.stock.moving_average(self.stock.close, 3)[-1] <
+                self.stock.moving_average(self.stock.close, 6)[-1])
 
     def best_four_point_to_buy(self):
         result = []

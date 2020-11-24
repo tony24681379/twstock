@@ -105,14 +105,14 @@ class LegacyBestFourPoint(object):
     def best_buy_1(self):
         """量大收紅
         """
-        result = self.data.capacity[-1] > self.data.capacity[-2] and \
+        result = self.data.volume[-1] > self.data.volume[-2] and \
                  self.data.price[-1] > self.data.open[-1]
         return result
 
     def best_buy_2(self):
         """量縮價不跌
         """
-        result = self.data.capacity[-1] < self.data.capacity[-2] and \
+        result = self.data.volume[-1] < self.data.volume[-2] and \
                  self.data.price[-1] > self.data.price[-2]
         return result
 
@@ -131,14 +131,14 @@ class LegacyBestFourPoint(object):
     def best_sell_1(self):
         """量大收黑
         """
-        result = self.data.capacity[-1] > self.data.capacity[-2] and \
+        result = self.data.volume[-1] > self.data.volume[-2] and \
                  self.data.price[-1] < self.data.open[-1]
         return result
 
     def best_sell_2(self):
         """量縮價跌
         """
-        result = self.data.capacity[-1] < self.data.capacity[-2] and \
+        result = self.data.volume[-1] < self.data.volume[-2] and \
                  self.data.price[-1] < self.data.price[-2]
         return result
 

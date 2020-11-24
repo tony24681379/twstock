@@ -14,7 +14,7 @@ class FetcherTest(object):
                 '199.00', '195.50', '196.50', '+2.00', '15,718']
         dt = self.fetcher._make_datatuple(data)
         self.assertEqual(dt.date, datetime.datetime(2017, 5, 2))
-        self.assertEqual(dt.capacity, 45851963)
+        self.assertEqual(dt.volume, 45851963)
         self.assertEqual(dt.turnover, 9053856108)
         self.assertEqual(dt.open, 198.5)
         self.assertEqual(dt.high, 199.0)
@@ -28,7 +28,7 @@ class FetcherTest(object):
                 '--', '--', '--', ' 0.00', '15,718']
         dt = self.fetcher._make_datatuple(data)
         self.assertEqual(dt.date, datetime.datetime(2017, 5, 2))
-        self.assertEqual(dt.capacity, 45851963)
+        self.assertEqual(dt.volume, 45851963)
         self.assertEqual(dt.turnover, 9053856108)
         self.assertEqual(dt.open, None)
         self.assertEqual(dt.high, None)
@@ -50,7 +50,7 @@ class TPEXFetcherTest(unittest.TestCase, FetcherTest):
                 '199.00', '195.50', '196.50', '2.00', '15,718']
         dt = self.fetcher._make_datatuple(data)
         self.assertEqual(dt.date, datetime.datetime(2017, 5, 2))
-        self.assertEqual(dt.capacity, 45851000)
+        self.assertEqual(dt.volume, 45851000)
         self.assertEqual(dt.turnover, 9053856000)
         self.assertEqual(dt.open, 198.5)
         self.assertEqual(dt.high, 199.0)
@@ -64,7 +64,7 @@ class TPEXFetcherTest(unittest.TestCase, FetcherTest):
                 '--', '--', '--', '0.00', '15,718']
         dt = self.fetcher._make_datatuple(data)
         self.assertEqual(dt.date, datetime.datetime(2017, 5, 2))
-        self.assertEqual(dt.capacity, 45851000)
+        self.assertEqual(dt.volume, 45851000)
         self.assertEqual(dt.turnover, 9053856000)
         self.assertEqual(dt.open, None)
         self.assertEqual(dt.high, None)
@@ -78,7 +78,7 @@ class TPEXFetcherTest(unittest.TestCase, FetcherTest):
                 '199.00', '195.50', '196.50', '2.00', '15,718']
         dt = self.fetcher._make_datatuple(data)
         self.assertEqual(dt.date, datetime.datetime(2017, 5, 2))
-        self.assertEqual(dt.capacity, 45851000)
+        self.assertEqual(dt.volume, 45851000)
         self.assertEqual(dt.turnover, 9053856000)
         self.assertEqual(dt.open, 198.5)
         self.assertEqual(dt.high, 199.0)
@@ -99,10 +99,10 @@ class StockTest(object):
         self.assertEqual(len(self.stk.date), len(self.stk.data))
         self.assertEqual(self.stk.date, [d.date for d in self.stk.data])
 
-    def test_capacity(self):
-        self.assertIsInstance(self.stk.capacity, list)
-        self.assertEqual(len(self.stk.capacity), len(self.stk.data))
-        self.assertEqual(self.stk.capacity, [d.capacity for d in self.stk.data])
+    def test_volume(self):
+        self.assertIsInstance(self.stk.volume, list)
+        self.assertEqual(len(self.stk.volume), len(self.stk.data))
+        self.assertEqual(self.stk.volume, [d.volume for d in self.stk.data])
 
     def test_turnover(self):
         self.assertIsInstance(self.stk.turnover, list)
@@ -160,12 +160,12 @@ class TWSEStockTest(unittest.TestCase, StockTest):
                           148.0, 146.0, 146.5, 146.5, 146.5, 146.5, 145.5,
                           145.5, 147.5, 146.5, 145.0, 147.0, 146.0])
 
-    def test_capacity(self):
+    def test_volume(self):
         self.stk.fetch(2015, 5)
-        self.assertIsInstance(self.stk.capacity, list)
-        self.assertEqual(len(self.stk.capacity), len(self.stk.data))
-        self.assertEqual(self.stk.capacity, [d.capacity for d in self.stk.data])
-        self.assertEqual(self.stk.capacity,
+        self.assertIsInstance(self.stk.volume, list)
+        self.assertEqual(len(self.stk.volume), len(self.stk.data))
+        self.assertEqual(self.stk.volume, [d.volume for d in self.stk.data])
+        self.assertEqual(self.stk.volume,
                          [30868640, 27789400, 18824208, 21908150, 20035646,
                           20402529, 24956498, 19437537, 39888654, 24831890,
                           26212375, 26321396, 26984912, 41286686, 22103852,
@@ -187,12 +187,12 @@ class TPEXStockTest(unittest.TestCase, StockTest):
                           86.1, 83.9, 84.5, 86.7, 86.3, 86.0, 86.2, 91.1, 90.9,
                           91.7, 90.4])
 
-    def test_capacity(self):
+    def test_volume(self):
         self.stk.fetch(2015, 5)
-        self.assertIsInstance(self.stk.capacity, list)
-        self.assertEqual(len(self.stk.capacity), len(self.stk.data))
-        self.assertEqual(self.stk.capacity, [d.capacity for d in self.stk.data])
-        self.assertEqual(self.stk.capacity,
+        self.assertIsInstance(self.stk.volume, list)
+        self.assertEqual(len(self.stk.volume), len(self.stk.data))
+        self.assertEqual(self.stk.volume, [d.volume for d in self.stk.data])
+        self.assertEqual(self.stk.volume,
                          [374000, 474000, 468000, 1257000, 1079000, 3400000,
                           3424000, 1078000, 1433000, 891000, 1202000, 1008000,
                           999000, 488000, 706000, 231000, 1890000, 782000,
