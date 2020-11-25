@@ -107,7 +107,7 @@ class WantgooFetcher(BaseFetcher):
             print('fail')
             data = []
 
-        filtered = filter(lambda l: l['type'] in ['Stock'], data)
+        filtered = filter(lambda l: l['type'] in ['Stock', 'ETF'], data)
         sids = map(lambda l: l['id'], filtered)
         return list(sids)
 
@@ -323,3 +323,7 @@ class Stock(analytics.Analytics):
     @property
     def d9(self):
         return self.data.d9.values
+
+    @property
+    def institutional_investors(self):
+        return self.data.institutional_investors.values

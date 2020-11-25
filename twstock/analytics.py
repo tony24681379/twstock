@@ -108,11 +108,11 @@ class Analytics(object):
                         if self.close[-i+1] < 20:
                             if three_line[-i] <= 0.03:
                                 print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
-                                return (self.sid, self.date[-i+1], '三線合一向上')
+                                return True
                         else:
                             if three_line[-i] <= 0.05:
                                 print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
-                                return (self.sid, self.date[-i+1], '三線合一向上')
+                                return True
 
     def up_jump_line(self):
         for i in range(2, self.length):
@@ -120,14 +120,14 @@ class Analytics(object):
                 if self.change[-i+1] > 3 and self.close[-i+1] > self.open[-i+1]:
                     if self.low[-i+1] > self.high[-i]:
                         print(self.sid, self.date[-i+1], '跳空向上')
-                        return (self.sid, self.date[-i+1], '跳空向上')
+                        return True
 
     def down_jump_line(self):
         for i in range(2, self.length):
                 if self.change[-i+1] < -3 and self.close[-i+1] < self.open[-i+1]:
                     if self.high[-i+1] < self.low[-i]:
                         print(self.sid, self.date[-i+1], '跳空向下')
-                        return (self.sid, self.date[-i+1], '跳空向下')
+                        return True
 
     def up_macd(self):
         for i in range(2, self.length):
@@ -136,7 +136,7 @@ class Analytics(object):
                     if self.macdsignal[-i+1] > self.macdsignal[-i] and self.macd[-i+1] > self.macd[-i]:
                         if self.macdsignal[-i+1] > 0 and self.macdsignal[-i] < 0:
                             print(self.sid, self.date[-i+1], '站上MACD')
-                            return (self.sid, self.date[-i+1], '站上MACD')
+                            return True
 
     def up_kd(self):
         for i in range(2, self.length):
@@ -145,7 +145,7 @@ class Analytics(object):
                     if self.k9[-i+1] > self.k9[-i]:
                         if self.k9[-i+1] > self.d9[-i+1] and self.k9[-i] < self.d9[-i]:
                             print(self.sid, self.date[-i+1], 'KD20向上')
-                            return (self.sid, self.date[-i+1], 'KD20向上')
+                            return True
 
     def up_bollinger(self):
         if len(self.bollinger_upper) > 10:
@@ -156,7 +156,7 @@ class Analytics(object):
                         if self.close[-i+1] > self.open[-i+1]:
                             if self.close[-i+1] > self.bollinger_upper[-i+1]:
                                 print(self.sid, self.date[-i+1], self.change[-i+1], self.bollinger_upper[-i+1], 'up_bollinger')
-                                return (self.sid, self.date[-i+1], '站上布林通道')
+                                return True
 
     def long_up(self):
         for i in range(2, self.length):
@@ -164,7 +164,7 @@ class Analytics(object):
                 if self.close[-i+1] > self.open[-i+1] and self.close[-i] < self.open[-i]:
                     if self.close[-i] > self.open[-i+1] and self.open[-i] < self.close[-i+1]:
                         print(self.sid, self.date[-i+1], self.change[-i+1], '長紅吞噬')
-                        return (self.sid, self.date[-i+1], '長紅吞噬')
+                        return True
 
     def long_down(self):
         for i in range(2, self.length):
@@ -172,7 +172,7 @@ class Analytics(object):
                 if self.close[-i+1] < self.open[-i+1] and self.close[-i] > self.open[-i]:
                     if self.close[-i] < self.open[-i+1] and self.open[-i] > self.close[-i+1]:
                         print(self.sid, self.date[-i+1], self.change[-i+1], '長黑吞噬')
-                        return (self.sid, self.date[-i+1], '長黑吞噬')
+                        return True
     
     def continuous_days(self):
         days = self.continuous(self.wave)

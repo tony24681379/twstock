@@ -1,9 +1,14 @@
 import itertools
 import time
 import os
+import pandas as pd
+import numpy as np
+from datetime import date
 from multiprocessing import Pool
 from twstock import Stock
 from twstock.stock import WantgooFetcher
+
+INDEX = ['收盤價', '投信買賣超', '三線合一', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬', '跳空向下', 'URL']
 
 class All():
     def __init__(self, initial_fetch: bool = True):
@@ -26,23 +31,10 @@ class All():
         pool = Pool(cpuCount)
 
         results = pool.map(self.getStock, self.list)
-
-        results = list(itertools.chain.from_iterable(results))
-        results = sorted(results, key=lambda s: s[0])
+        self.data = pd.DataFrame(dict(results)).T
         endTime = time.time()
         print(endTime - startTime)
-
-        total = {}
-
-        for (sid, date, typ) in results:
-            if sid in total:
-                total[sid].add((date, typ))
-            else:
-                total[sid] = set((date, typ))
-
-        for sid in total:
-            print(sid, total[sid])
-            print('https://histock.tw/stock/tv/tvchart.aspx?no='+str(sid))
+        self.data.to_csv(date.today().strftime("%Y%m%d") + '.csv')
 
     def getStock(self, sid: int):
         stock = Stock(sid)
@@ -50,40 +42,49 @@ class All():
         print(stock.sid)
 
         if len(stock.close) == 0 or stock.data.volume.mean() < 500:
-            return []
+            check = [
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None
+            ]
+            return (stock.sid, pd.Series(check, index=INDEX))
 
-        result = []
-        up_check = []
-        down_check = []
+        check = [stock.close[-1], stock.institutional_investors[-1] if stock.institutional_investors[-1] > 0 else None]
 
         if stock.wave[-1] > 0:
-            up_check = [
+            check = check + [
                 stock.up_three_line(),
                 stock.up_jump_line(),
                 stock.long_up(),
                 stock.up_kd(),
                 stock.up_macd(),
-                stock.up_bollinger()
-                # stock.continuous_days()
+                stock.up_bollinger(),
+                None,
+                None,
             ]
-
-        if stock.wave[-1] < 0:
-            down_check = [
+        else:
+            check = check + [
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 stock.long_down(),
-                stock.down_jump_line()
-                # stock.continuous_days()
+                stock.down_jump_line(),
             ]
 
-        for index, v in enumerate(up_check):
-            if v:
-                result.append(v)
-
-        for index, v in enumerate(down_check):
-            if v:
-                result.append(v)
-
-        return result
-
+        check = check + ['https://histock.tw/stock/tv/tvchart.aspx?no='+str(sid)]
+        
+        return (stock.sid, pd.Series(check, index=INDEX))
 
 def init(l):
     global lock
