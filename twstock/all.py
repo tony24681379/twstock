@@ -34,7 +34,7 @@ class All():
         self.data = pd.DataFrame(dict(results)).T
         endTime = time.time()
         print(endTime - startTime)
-        self.data.to_csv(date.today().strftime("%Y%m%d") + '.csv')
+        self.data.to_excel(date.today().strftime("%Y%m%d") + '.xlsx', sheet_name='Sheet1')
 
     def getStock(self, sid: int):
         stock = Stock(sid)
