@@ -76,6 +76,7 @@ class WantgooFetcher(BaseFetcher):
                 candlesticks = candlesticks_response.json()[::-1]
                 foreign = foreign_response.json()[::-1]
                 investment_trust = investment_trust_response.json()[::-1]
+                major_investors = major_investors_response.json()[::-1]
             except JSONDecodeError:
                 continue
             else:
@@ -87,9 +88,9 @@ class WantgooFetcher(BaseFetcher):
             candlesticks = []
             investment_trust = []
 
-        return self.purify(candlesticks, foreign, investment_trust)
+        return self.purify(candlesticks, foreign, investment_trust, major_investors)
 
-    def purify(self, candlesticks, foreign, investment_trust):
+    def purify(self, candlesticks, foreign, investment_trust, major_investors):
         candlesticks_data = pd.DataFrame(candlesticks, columns=['volume', 'open', 'close', 'high', 'low'])
         candlesticks_data['date'] = [datetime.datetime.fromtimestamp(d['tradeDate']/1000) for d in candlesticks]
 
@@ -99,12 +100,24 @@ class WantgooFetcher(BaseFetcher):
         investment_trust_data = pd.DataFrame(investment_trust, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "investment_trust"})
         investment_trust_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in investment_trust]
 
+        major_investors_data = pd.DataFrame(major_investors, columns=['date', 'stockAgentMainPower', 'stockAgentDiff', 'skp5', 'skp20']).rename(columns={"stockAgentMainPower": "major_investors", "stockAgentDiff": "agent_diff"})
+        major_investors_data['date'] = [datetime.datetime.strptime(d['date'], '%Y-%m-%dT%H:%M:%S') for d in major_investors]
+
         data = pd.merge(candlesticks_data, foreign_data, how='left', on=['date'])
         data = pd.merge(data, investment_trust_data, how='left', on=['date'])
+        data = pd.merge(data, major_investors_data, how='left', on=['date'])
         data['foreign'] = data['foreign'].fillna(0.0)
         data['investment_trust'] = data['investment_trust'].fillna(0.0)
+        data['major_investors'] = data['major_investors'].fillna(0.0)
+        data['agent_diff'] = data['agent_diff'].fillna(0.0)
+        data['skp5'] = data['skp5'].fillna(0.0)
+        data['skp20'] = data['skp20'].fillna(0.0)
 
-        return data[['date', 'volume', 'open', 'close', 'high', 'low', 'foreign', 'investment_trust']]
+        return data[[
+            'date', 'volume', 'open', 'close', 'high', 'low',
+            'foreign', 'investment_trust',
+            'major_investors', 'agent_diff', 'skp5', 'skp20'
+        ]]
 
     def getAllStockList(self, retry: int=5):
         for retry_i in range(retry):
@@ -125,8 +138,7 @@ class WantgooFetcher(BaseFetcher):
             data = []
 
         filtered = filter(lambda l: l['type'] in ['Stock', 'ETF'], data)
-        sids = map(lambda l: l['id'], filtered)
-        return list(sids)
+        return list(filtered)
 
 class Stock(analytics.Analytics):
     def __init__(self, sid: str, load_data: bool=True):
@@ -352,3 +364,19 @@ class Stock(analytics.Analytics):
     @property
     def investment_trust(self):
         return self.data.investment_trust.values
+
+    @property
+    def major_investors(self):
+        return self.data.major_investors.values
+
+    @property
+    def agent_diff(self):
+        return self.data.agent_diff.values
+
+    @property
+    def skp5(self):
+        return self.data.skp5.values
+
+    @property
+    def skp20(self):
+        return self.data.skp20.values
