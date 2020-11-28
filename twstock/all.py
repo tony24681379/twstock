@@ -8,7 +8,14 @@ from multiprocessing import Pool
 from twstock import Stock
 from twstock.stock import WantgooFetcher
 
-INDEX = ['收盤價', '投信買賣超', '三線合一', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬', '跳空向下', 'URL']
+INDEX = [
+    '收盤價',
+    '本日外資買賣超', '本週外資買賣超', '本月外資買賣超',
+    '本日投信買賣超', '本週投信買賣超', '本月投信買賣超',
+    '三線合一', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬',
+    '跳空向下', '空頭',
+    'URL'
+]
 
 class All():
     def __init__(self, initial_fetch: bool = True):
@@ -36,28 +43,27 @@ class All():
         print(endTime - startTime)
         self.data.to_excel(date.today().strftime("%Y%m%d") + '.xlsx', sheet_name='Sheet1')
 
+    def sum_days(self, data, days):
+        result = sum(data[days * -1:])
+        return result/1000 if result != 0 else None
+
     def getStock(self, sid: int):
         stock = Stock(sid)
 
         print(stock.sid)
 
         if len(stock.close) == 0 or stock.data.volume.mean() < 500:
-            check = [
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None
-            ]
-            return (stock.sid, pd.Series(check, index=INDEX))
+            return (stock.sid, pd.Series(index=INDEX))
 
-        check = [stock.close[-1], stock.institutional_investors[-1] if stock.institutional_investors[-1] > 0 else None]
+        check = [
+            stock.close[-1], 
+            stock.foreign[-1] if stock.foreign[-1] != 0 else None,
+            self.sum_days(stock.foreign ,5),
+            self.sum_days(stock.foreign ,20),
+            stock.investment_trust[-1] if stock.investment_trust[-1] != 0 else None,
+            self.sum_days(stock.investment_trust ,5),
+            self.sum_days(stock.investment_trust ,20)
+        ]
 
         if stock.wave[-1] > 0:
             check = check + [
@@ -69,6 +75,7 @@ class All():
                 stock.up_bollinger(),
                 None,
                 None,
+                None
             ]
         else:
             check = check + [
@@ -80,6 +87,7 @@ class All():
                 None,
                 stock.long_down(),
                 stock.down_jump_line(),
+                stock.short()
             ]
 
         check = check + ['https://histock.tw/stock/tv/tvchart.aspx?no='+str(sid)]

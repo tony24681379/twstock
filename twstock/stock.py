@@ -57,14 +57,25 @@ class WantgooFetcher(BaseFetcher):
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
-            institutional_investors_response = requests.get(
+            foreign_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/institutional-investors/foreign/historical-net-buy-sell',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
+            investment_trust_response = requests.get(
                 self.REPORT_URL + 'stock/' + sid + '/institutional-investors/investment-trust/historical-net-buy-sell',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
+            major_investors_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/major-investors/main-trend-data',
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
             try:
                 candlesticks = candlesticks_response.json()[::-1]
-                institutional_investors = institutional_investors_response.json()[::-1]
+                foreign = foreign_response.json()[::-1]
+                investment_trust = investment_trust_response.json()[::-1]
             except JSONDecodeError:
                 continue
             else:
@@ -72,26 +83,32 @@ class WantgooFetcher(BaseFetcher):
         else:
             # Fail in all retries
             print(sid + 'fail')
+            foreign = []
             candlesticks = []
-            institutional_investors = []
+            investment_trust = []
 
-        return self.purify(candlesticks, institutional_investors)
+        return self.purify(candlesticks, foreign, investment_trust)
 
-    def purify(self, candlesticks, institutional_investors):
+    def purify(self, candlesticks, foreign, investment_trust):
         candlesticks_data = pd.DataFrame(candlesticks, columns=['volume', 'open', 'close', 'high', 'low'])
-        institutional_investors_data = pd.DataFrame(institutional_investors, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "institutional_investors"})
         candlesticks_data['date'] = [datetime.datetime.fromtimestamp(d['tradeDate']/1000) for d in candlesticks]
-        institutional_investors_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in institutional_investors]
-        institutional_investors_data['institutional_investors']
 
-        data = pd.merge(candlesticks_data, institutional_investors_data, how='left', on=['date'])
-        data['institutional_investors'] = data['institutional_investors'].fillna(0.0)
+        foreign_data = pd.DataFrame(foreign, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "foreign"})
+        foreign_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in foreign]
 
-        return data[['date', 'volume', 'open', 'close', 'high', 'low', 'institutional_investors']]
+        investment_trust_data = pd.DataFrame(investment_trust, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "investment_trust"})
+        investment_trust_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in investment_trust]
+
+        data = pd.merge(candlesticks_data, foreign_data, how='left', on=['date'])
+        data = pd.merge(data, investment_trust_data, how='left', on=['date'])
+        data['foreign'] = data['foreign'].fillna(0.0)
+        data['investment_trust'] = data['investment_trust'].fillna(0.0)
+
+        return data[['date', 'volume', 'open', 'close', 'high', 'low', 'foreign', 'investment_trust']]
 
     def getAllStockList(self, retry: int=5):
         for retry_i in range(retry):
-            r = requests.get(self.REPORT_URL+'investrue/all-alive',
+            r = requests.get(self.REPORT_URL + 'investrue/all-alive',
                 headers = self.HEADERS,
                 proxies=get_proxies()
                 )
@@ -301,6 +318,10 @@ class Stock(analytics.Analytics):
         return self.data.ma20.values
 
     @property
+    def ma60(self):
+        return self.data.ma20.values
+
+    @property
     def bollinger_upper(self):
         return self.data.bollinger_upper.values
 
@@ -325,5 +346,9 @@ class Stock(analytics.Analytics):
         return self.data.d9.values
 
     @property
-    def institutional_investors(self):
-        return self.data.institutional_investors.values
+    def foreign(self):
+        return self.data.foreign.values
+
+    @property
+    def investment_trust(self):
+        return self.data.investment_trust.values

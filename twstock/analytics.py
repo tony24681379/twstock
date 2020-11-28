@@ -173,6 +173,12 @@ class Analytics(object):
                     if self.close[-i] < self.open[-i+1] and self.open[-i] > self.close[-i+1]:
                         print(self.sid, self.date[-i+1], self.change[-i+1], '長黑吞噬')
                         return True
+
+    def short(self):
+        for i in range(2, self.length):
+            if (self.ma60[-i] > self.ma20[-i] and self.ma20[-i] > self.ma10[-i]
+                and self.ma10[-i] > self.ma5[-i]):
+                    return True
     
     def continuous_days(self):
         days = self.continuous(self.wave)
