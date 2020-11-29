@@ -34,6 +34,8 @@ except ImportError as e:
 WANTGOO_BASE_URL = 'https://www.wantgoo.com/'
 DATATUPLE = namedtuple('Data', ['date', 'volume', 'open', 'high', 'low', 'close'])
 
+RAW_PATH = 'raw/'
+
 class BaseFetcher(object):
     def fetch(self, year, month, sid, retry):
         pass
@@ -144,7 +146,7 @@ class Stock(analytics.Analytics):
     def __init__(self, sid: str, load_data: bool=True):
         self.sid = sid
         self.fetcher = WantgooFetcher()
-        self.path = "data/" + self.sid + ".csv"
+        self.path = RAW_PATH + self.sid + ".csv"
 
         if load_data:
             if os.path.isfile(self.path):

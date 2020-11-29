@@ -11,7 +11,7 @@ from twstock.stock import WantgooFetcher
 
 INDEX = [
     'id',
-    '收盤價', '漲跌幅',
+    '收盤價', '漲跌幅', '成交量',
     '本日外資買賣超', '本週外資買賣超', '本月外資買賣超',
     '本日投信買賣超', '本週投信買賣超', '本月投信買賣超',
     '本日主力買賣超', '本週主力買賣超', '本月主力買賣超',
@@ -20,6 +20,8 @@ INDEX = [
     '跳空向下', '空頭',
     'URL'
 ]
+
+ORGANIZATION = 'config/organization.csv'
 
 class All():
     def __init__(self, initial_fetch: bool = True):
@@ -42,7 +44,9 @@ class All():
         pool = Pool(cpuCount)
 
         results = pool.map(self.getStock, map(lambda l: l['id'], self.list))
-        self.data = pd.merge(pd.DataFrame(self.list, columns=['id', 'name']), pd.DataFrame(dict(results)).T, on=['id']).rename(columns={"id": "股票代碼", "name": "股票名稱"})
+
+        self.data = pd.merge(pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']], pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id'])
+        self.data = pd.merge(self.data, pd.DataFrame(dict(results)).T, on=['id']).rename(columns={"id": "股票代碼", "name": "股票名稱", "industry.shortName": "產業"})
         endTime = time.time()
         print(endTime - startTime)
         self.data.to_excel(date.today().strftime("%Y%m%d") + '.xlsx', sheet_name='Sheet1', index=False)
@@ -63,6 +67,7 @@ class All():
             stock.sid,
             stock.close[-1], 
             stock.change[-1],
+            stock.volume[-1],
             stock.foreign[-1]/1000 if stock.foreign[-1] != 0 else None,
             self.sum_days(stock.foreign ,5),
             self.sum_days(stock.foreign ,20),
