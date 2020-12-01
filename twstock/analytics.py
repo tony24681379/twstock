@@ -90,29 +90,31 @@ class Analytics(object):
                 check_value)
 
     def up_three_line(self):
-        three_line = []
-        for i in range(1, len(self.close) - 1):
-            sub = (max(self.ma5[-i] , self.ma10[-i], self.ma20[-i]) - min(self.ma5[-i] , self.ma10[-i], self.ma20[-i]))
-            avg = statistics.mean([self.ma5[-i], self.ma10[-i], self.ma20[-i]])
-            if avg == 0:
-                return None
-
-            three_line.append(sub/avg)
-
-        three_line = three_line[::-1]
-
         for i in range(2, self.length):
-            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
-            if self.volume[-i+1] > 1000 and self.volume[-i+1] > self.volume[-i] * 2:
-                if self.change[-i+1] > 3 and self.close[-i+1] > self.open[-i+1]:
-                        if self.close[-i+1] < 20:
-                            if three_line[-i] <= 0.03:
-                                print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
-                                return True
-                        else:
-                            if three_line[-i] <= 0.05:
-                                print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], three_line[-i])
-                                return True
+            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+            if self.volume[-i+1] > 1000:
+                if self.change[-i+1] > 2 and self.close[-i+1] > self.open[-i+1] and self.close[-i+1] > self.close[-i]:
+                    if self.close[-i+1] < 20:
+                        if self.three_line_diff[-i] <= 0.03:
+                            print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+                            return True
+                    else:
+                        if self.three_line_diff[-i] <= 0.02:
+                            print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+                            return True
+
+    def down_three_line(self):
+        for i in range(2, self.length):
+            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+            if self.change[-i+1] < -2 and self.close[-i+1] < self.open[-i+1] and self.close[-i+1] < self.close[-i]:
+                if self.close[-i+1] < 20:
+                    if self.three_line_diff[-i] <= 0.03:
+                        print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+                        return True
+                else:
+                    if self.three_line_diff[-i] <= 0.02:
+                        print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+                        return True
 
     def up_jump_line(self):
         for i in range(2, self.length):

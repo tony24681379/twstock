@@ -5,6 +5,7 @@ import datetime
 import urllib.parse
 import time
 import os
+import statistics
 from twstock.proxy import get_proxies
 import pandas as pd
 from threading import Lock
@@ -197,8 +198,21 @@ class Stock(analytics.Analytics):
         self.data['macdsignal'] = macdsignal
         self.data['macdhist'] = macdhist
 
+        self.calc_three_line_diff()
         self.calc_trend()
         self.data = self.data.dropna(how='any')
+    
+    def calc_three_line_diff(self):
+        three_line_diff = []
+        for i in range(0, len(self.close)):
+            sub = (max(self.ma5[i] , self.ma10[i], self.ma20[i]) - min(self.ma5[i] , self.ma10[i], self.ma20[i]))
+            avg = statistics.mean([self.ma5[i], self.ma10[i], self.ma20[i]])
+            if avg == 0:
+                return None
+
+            three_line_diff.append(sub/avg)
+
+        self.data['three_line_diff'] = three_line_diff
 
     def calc_trend(self):
         high = -sys.maxsize-1
@@ -333,7 +347,7 @@ class Stock(analytics.Analytics):
 
     @property
     def ma60(self):
-        return self.data.ma20.values
+        return self.data.ma60.values
 
     @property
     def bollinger_upper(self):
@@ -382,3 +396,7 @@ class Stock(analytics.Analytics):
     @property
     def skp20(self):
         return self.data.skp20.values
+
+    @property
+    def three_line_diff(self):
+        return self.data.three_line_diff.values

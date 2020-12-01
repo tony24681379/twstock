@@ -16,8 +16,8 @@ INDEX = [
     '本日投信買賣超', '本週投信買賣超', '本月投信買賣超',
     '本日主力買賣超', '本週主力買賣超', '本月主力買賣超',
     '本日買賣家數差', '本週籌碼集中度', '本月籌碼集中度',
-    '三線合一', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬',
-    '跳空向下', '空頭',
+    '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬',
+    '三線合一向下', '跳空向下', '空頭',
     'URL'
 ]
 
@@ -41,7 +41,7 @@ class All():
         startTime = time.time()
         cpuCount = os.cpu_count()
 
-        pool = Pool(cpuCount)
+        pool = Pool(cpuCount*3)
 
         results = pool.map(self.getStock, map(lambda l: l['id'], self.list))
 
@@ -60,7 +60,7 @@ class All():
 
         print(stock.sid)
 
-        if len(stock.close) < 60 or statistics.mean(stock.volume[:-10]) < 500:
+        if len(stock.close) < 60:
             return (stock.sid, pd.Series(index=INDEX))
 
         check = [
@@ -92,6 +92,7 @@ class All():
                 stock.up_bollinger(),
                 None,
                 None,
+                None,
                 None
             ]
         else:
@@ -102,6 +103,7 @@ class All():
                 None,
                 None,
                 None,
+                stock.down_three_line(),
                 stock.long_down(),
                 stock.down_jump_line(),
                 stock.short()
