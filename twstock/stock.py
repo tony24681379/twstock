@@ -54,19 +54,19 @@ class WantgooFetcher(BaseFetcher):
     def fetch(self, sid: str, num: int, retry: int=5):
         params = {'before': int(time.mktime(datetime.datetime.now().timetuple()))*1000, 'top': num}
         for retry_i in range(retry):
+            company_profile_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/company-profile-data',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+            
             candlesticks_response = requests.get(
                 self.REPORT_URL + 'investrue/' + sid + '/historical-daily-candlesticks',
                 params = params,
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
-            foreign_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/institutional-investors/foreign/historical-net-buy-sell',
-                headers = self.HEADERS,
-                proxies=get_proxies())
-
-            investment_trust_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/institutional-investors/investment-trust/historical-net-buy-sell',
+            institutional_investors_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/institutional-investors/trend-data?topdays=20',
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
@@ -76,9 +76,10 @@ class WantgooFetcher(BaseFetcher):
                 proxies=get_proxies())
 
             try:
+                info = company_profile_response.json()
+                self.total_stock = info['outstandingShares'] / 1000.0 if type(info) is dict else 1.0
                 candlesticks = candlesticks_response.json()[::-1]
-                foreign = foreign_response.json()[::-1]
-                investment_trust = investment_trust_response.json()[::-1]
+                institutional_investors = institutional_investors_response.json()[::-1]
                 major_investors = major_investors_response.json()[::-1]
             except JSONDecodeError:
                 continue
@@ -87,38 +88,45 @@ class WantgooFetcher(BaseFetcher):
         else:
             # Fail in all retries
             print(sid + 'fail')
-            foreign = []
             candlesticks = []
-            investment_trust = []
+            institutional_investors = []
+            major_investors = []
 
-        return self.purify(candlesticks, foreign, investment_trust, major_investors)
+        print(self.total_stock)
 
-    def purify(self, candlesticks, foreign, investment_trust, major_investors):
+        return self.purify(candlesticks, major_investors, institutional_investors)
+
+    def purify(self, candlesticks, major_investors, institutional_investors):
         candlesticks_data = pd.DataFrame(candlesticks, columns=['volume', 'open', 'close', 'high', 'low'])
         candlesticks_data['date'] = [datetime.datetime.fromtimestamp(d['tradeDate']/1000) for d in candlesticks]
 
-        foreign_data = pd.DataFrame(foreign, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "foreign"})
-        foreign_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in foreign]
+        institutional_investors_data = pd.DataFrame(institutional_investors, columns=[
+            'date',
+            'sumForeignNoDealer', 'sumForeignWithDealer', 'sumING', 'sumDealerBySelf', 'sumDealerHedging',
+            'sumHoldingRate', 'foreignHoldingRate', 'ingHolding']).rename(columns={
+                'sumING': 'investment_trust', 
+                'sumHoldingRate': 'sum_holding_rate',
+                'foreignHoldingRate': 'foreign_holding_rate'})
+        institutional_investors_data['date'] = [datetime.datetime.strptime(d['date'], '%Y-%m-%dT%H:%M:%S') for d in institutional_investors]
 
-        investment_trust_data = pd.DataFrame(investment_trust, columns=['date', 'netBuySell']).rename(columns={"netBuySell": "investment_trust"})
-        investment_trust_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in investment_trust]
-
-        major_investors_data = pd.DataFrame(major_investors, columns=['date', 'stockAgentMainPower', 'stockAgentDiff', 'skp5', 'skp20']).rename(columns={"stockAgentMainPower": "major_investors", "stockAgentDiff": "agent_diff"})
+        major_investors_data = (pd.DataFrame(major_investors, columns=['date', 'stockAgentMainPower', 'stockAgentDiff', 'skp5', 'skp20'])
+            .rename(columns={"stockAgentMainPower": "major_investors", "stockAgentDiff": "agent_diff"}))
         major_investors_data['date'] = [datetime.datetime.strptime(d['date'], '%Y-%m-%dT%H:%M:%S') for d in major_investors]
 
-        data = pd.merge(candlesticks_data, foreign_data, how='left', on=['date'])
-        data = pd.merge(data, investment_trust_data, how='left', on=['date'])
+        data = pd.merge(candlesticks_data, institutional_investors_data, how='left', on=['date'])
         data = pd.merge(data, major_investors_data, how='left', on=['date'])
-        data['foreign'] = data['foreign'].fillna(0.0)
-        data['investment_trust'] = data['investment_trust'].fillna(0.0)
-        data['major_investors'] = data['major_investors'].fillna(0.0)
-        data['agent_diff'] = data['agent_diff'].fillna(0.0)
-        data['skp5'] = data['skp5'].fillna(0.0)
-        data['skp20'] = data['skp20'].fillna(0.0)
+
+        data = data.assign(investment_trust_holding_rate=round(data['ingHolding'].astype(float) / self.total_stock * 100, 2))
+        data = (data.assign(dealer_holding_rate=round(data['sum_holding_rate'].astype(float) - data['foreign_holding_rate'].astype(float) - data['investment_trust_holding_rate'].astype(float), 2),
+            foreign=round((data['sumForeignNoDealer'] + data['sumForeignWithDealer']).astype(float) / self.total_stock  * 100, 2),
+            investment_trust=round(data['investment_trust'].astype(float) / self.total_stock  * 100, 2),
+            dealer=round((data['sumDealerBySelf'] + data['sumDealerHedging']).astype(float) / self.total_stock * 100, 2)
+        ))
+        data = data.fillna(0.0)
 
         return data[[
             'date', 'volume', 'open', 'close', 'high', 'low',
-            'foreign', 'investment_trust',
+            'foreign', 'investment_trust', 'dealer', 'sum_holding_rate', 'foreign_holding_rate', 'investment_trust_holding_rate', 'dealer_holding_rate',
             'major_investors', 'agent_diff', 'skp5', 'skp20'
         ]]
 
@@ -174,7 +182,7 @@ class Stock(analytics.Analytics):
         self.data = self.fetcher.fetch(self.sid, num)
 
     def calc_change(self, today, yesterday):
-        return round((today-yesterday)/yesterday*100,2)
+        return round((today-yesterday)/yesterday*100, 2)
 
     def calc_base(self):
         bollinger_upper, _, bollinger_lower = talib.BBANDS(self.close, 20)
@@ -380,6 +388,26 @@ class Stock(analytics.Analytics):
     @property
     def investment_trust(self):
         return self.data.investment_trust.values
+
+    @property
+    def dealer(self):
+        return self.data.dealer.values
+
+    @property
+    def foreign_holding_rate(self):
+        return self.data.foreign_holding_rate.values
+
+    @property
+    def investment_trust_holding_rate(self):
+        return self.data.investment_trust_holding_rate.values
+
+    @property
+    def dealer_holding_rate(self):
+        return self.data.dealer_holding_rate.values
+
+    @property
+    def sum_holding_rate(self):
+        return self.data.sum_holding_rate.values
 
     @property
     def major_investors(self):

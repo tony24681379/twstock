@@ -12,8 +12,10 @@ from twstock.stock import WantgooFetcher
 INDEX = [
     'id',
     '收盤價', '漲跌幅', '成交量',
-    '本日外資買賣超', '本週外資買賣超', '本月外資買賣超',
-    '本日投信買賣超', '本週投信買賣超', '本月投信買賣超',
+    '本日外本比', '本週外本比', '本月外本比', '外資佔比',
+    '本日投本比', '本週投本比', '本月投本比', '投信佔比',
+    '本日自本比', '本週自本比', '本月自本比', '自營商佔比',
+    '三大法人佔比',
     '本日主力買賣超', '本週主力買賣超', '本月主力買賣超',
     '本日買賣家數差', '本週籌碼集中度', '本月籌碼集中度',
     '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬',
@@ -53,7 +55,7 @@ class All():
 
     def sum_days(self, data, days):
         result = sum(data[days * -1:])
-        return result/1000 if result != 0 else None
+        return result if result != 0 else None
 
     def getStock(self, sid: int):
         stock = Stock(sid)
@@ -68,12 +70,22 @@ class All():
             stock.close[-1], 
             stock.change[-1],
             stock.volume[-1],
-            stock.foreign[-1]/1000 if stock.foreign[-1] != 0 else None,
+            stock.foreign[-1] if stock.foreign[-1] != 0 else None,
             self.sum_days(stock.foreign ,5),
             self.sum_days(stock.foreign ,20),
-            stock.investment_trust[-1]/1000 if stock.investment_trust[-1] != 0 else None,
+            stock.foreign_holding_rate[-1],
+            
+            stock.investment_trust[-1] if stock.investment_trust[-1] != 0 else None,
             self.sum_days(stock.investment_trust ,5),
             self.sum_days(stock.investment_trust ,20),
+            stock.investment_trust_holding_rate[-1],
+
+            stock.dealer[-1] if stock.dealer[-1] != 0 else None,
+            self.sum_days(stock.dealer ,5),
+            self.sum_days(stock.dealer ,20),
+            stock.dealer_holding_rate[-1],
+            stock.sum_holding_rate[-1],
+
             stock.major_investors[-1]/1000 if stock.major_investors[-1] != 0 else None,
             self.sum_days(stock.major_investors ,5),
             self.sum_days(stock.major_investors ,20),

@@ -108,11 +108,11 @@ class Analytics(object):
             # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
             if self.change[-i+1] < -2 and self.close[-i+1] < self.open[-i+1] and self.close[-i+1] < self.close[-i]:
                 if self.close[-i+1] < 20:
-                    if self.three_line_diff[-i] <= 0.03:
+                    if self.three_line_diff[-i] <= 0.02:
                         print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
                         return self.date[-i+1]
                 else:
-                    if self.three_line_diff[-i] <= 0.02:
+                    if self.three_line_diff[-i] <= 0.01:
                         print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
                         return self.date[-i+1]
 
