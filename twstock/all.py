@@ -18,6 +18,7 @@ INDEX = [
     '三大法人佔比',
     '本日主力買賣超', '本週主力買賣超', '本月主力買賣超',
     '本日買賣家數差', '本週籌碼集中度', '本月籌碼集中度',
+    '波段天數', '趨勢天數',
     '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '長黑吞噬',
     '三線合一向下', '跳空向下', '空頭',
     'URL'
@@ -91,7 +92,9 @@ class All():
             self.sum_days(stock.major_investors ,20),
             stock.agent_diff[-1],
             stock.skp5[-1],
-            stock.skp20[-1]
+            stock.skp20[-1],
+            stock.continuous(stock.wave),
+            stock.continuous(stock.trend)
         ]
 
         if stock.wave[-1] > 0:

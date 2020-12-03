@@ -294,9 +294,9 @@ class Stock(analytics.Analytics):
         if low is True:
             trend[low_point] = -3
 
-        for i in range(1, len(trend)):
-            if trend[i] == 0:
-                trend[i] = trend[i-1]
+        for i in range(2, len(trend) - 1):
+            if trend[-i] == 0:
+                trend[-i] = trend[-i+1]
 
         self.data['wave'] = wave
         self.data['trend'] = trend

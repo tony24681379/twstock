@@ -13,15 +13,13 @@ class Analytics(object):
     length = 10
 
     def continuous(self, data):
-        diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]
+        diff = [1 if data[-i] > 0 else -1 for i in range(1, len(data))]
         cont = 0
-        print(diff)
         for v in diff:
             if v == diff[0]:
                 cont += 1
             else:
                 break
-        print(cont)
         return cont * diff[0]
 
     def pivot_point(self):
@@ -184,7 +182,6 @@ class Analytics(object):
     
     def continuous_days(self):
         days = self.continuous(self.wave)
-        print(self.sid, days, '趨勢天數')
         if days > 5:
             return (self.sid, self.date[-1], days)
 
