@@ -13,7 +13,7 @@ class Analytics(object):
     length = 10
 
     def continuous(self, data):
-        diff = [1 if data[-i] > 0 else -1 for i in range(1, len(data))]
+        diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]
         cont = 0
         for v in diff:
             if v == diff[0]:
@@ -180,10 +180,15 @@ class Analytics(object):
                 and self.ma10[-i] > self.ma5[-i]):
                     return self.date[-i+1]
     
-    def continuous_days(self):
-        days = self.continuous(self.wave)
-        if days > 5:
-            return (self.sid, self.date[-1], days)
+    def continuous_trend_days(self, data):
+        diff = [1 if data[-i] > 0 else -1 for i in range(1, len(data))]
+        cont = 0
+        for v in diff:
+            if v == diff[0]:
+                cont += 1
+            else:
+                break
+        return cont * diff[0]
 
 class BestFourPoint(object):
     BEST_BUY_WHY = ['量大收紅', '量縮價不跌', '三日均價由下往上', '三日均價大於六日均價']

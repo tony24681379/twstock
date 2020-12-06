@@ -18,7 +18,7 @@ INDEX = [
     '三大法人佔比',
     '本日主力買賣超', '本週主力買賣超', '本月主力買賣超',
     '本日買賣家數差', '本週籌碼集中度', '本月籌碼集中度',
-    '波段天數', '趨勢天數',
+    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
     '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌',
     '三線合一向下', '長黑吞噬', '跳空向下', '空頭',
     'URL'
@@ -66,6 +66,11 @@ class All():
         if len(stock.close) < 60:
             return (stock.sid, pd.Series(index=INDEX))
 
+        wave_days = stock.continuous_trend_days(stock.wave)
+        trend_days = stock.continuous_trend_days(stock.trend)
+        wave_days
+        print(trend_days)
+
         check = [
             stock.sid,
             stock.close[-1], 
@@ -93,8 +98,10 @@ class All():
             stock.agent_diff[-1],
             stock.skp5[-1],
             stock.skp20[-1],
-            stock.continuous(stock.wave),
-            stock.continuous(stock.trend)
+            wave_days,
+            stock.calc_change(stock.close[-1], stock.close[-1 * abs(wave_days)]),
+            trend_days,
+            stock.calc_change(stock.close[-1], stock.close[-1 * abs(trend_days)])
         ]
 
         if stock.wave[-1] > 0:

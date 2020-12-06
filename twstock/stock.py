@@ -181,8 +181,8 @@ class Stock(analytics.Analytics):
     def fetch(self, num):
         self.data = self.fetcher.fetch(self.sid, num)
 
-    def calc_change(self, today, yesterday):
-        return round((today-yesterday)/yesterday*100, 2)
+    def calc_change(self, after, before):
+        return round((after - before)/before * 100, 2)
 
     def calc_base(self):
         bollinger_upper, _, bollinger_lower = talib.BBANDS(self.close, 20)
@@ -288,11 +288,14 @@ class Stock(analytics.Analytics):
                         low = False
 
                 low_point = i
+        print(high, low)
 
         if high is True:
             trend[high_point] = 3
+            trend[-1] = 3
         if low is True:
             trend[low_point] = -3
+            trend[-1] = -3
 
         for i in range(2, len(trend) - 1):
             if trend[-i] == 0:
