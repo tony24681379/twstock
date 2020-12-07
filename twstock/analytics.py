@@ -10,7 +10,7 @@ from collections import namedtuple
 conter_tuple = namedtuple('counter',('index', 'is_up'))
 
 class Analytics(object):
-    length = 10
+    length = 15
 
     def continuous(self, data):
         diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]
@@ -174,10 +174,24 @@ class Analytics(object):
                         print(self.sid, self.date[-i+1], self.change[-i+1], '長黑吞噬')
                         return self.date[-i+1]
 
+    def long(self):
+        for i in range(2, self.length):
+            if (self.ma20[-i] <= self.ma10[-i] and self.ma10[-i] <= self.ma5[-i]):
+                    return self.date[-i+1]
+
     def short(self):
         for i in range(2, self.length):
-            if (self.ma60[-i] > self.ma20[-i] and self.ma20[-i] > self.ma10[-i]
-                and self.ma10[-i] > self.ma5[-i]):
+            if (self.ma20[-i] >= self.ma10[-i] and self.ma10[-i] >= self.ma5[-i]):
+                    return self.date[-i+1]
+
+    def up_session(self):
+        for i in range(2, self.length):
+            if self.close[-i] > self.ma60[-i]:
+                    return self.date[-i+1]
+
+    def down_session(self):
+        for i in range(2, self.length):
+            if self.close[-i] < self.ma60[-i]:
                     return self.date[-i+1]
     
     def continuous_trend_days(self, data):

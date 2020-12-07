@@ -22,9 +22,8 @@ INDEX = [
     '本日融資餘額比', '本週融資餘額比', '本月融資餘額比',
     '本日融券餘額比', '本週融券餘額比', '本月融券餘額比', 
     '本日券資比', '本週券資比', '本月券資比',
-    '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌',
-    '三線合一向下', '長黑吞噬', '跳空向下', '空頭',
-    'URL'
+    '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '多頭排列', '季線以上',
+    '三線合一向下', '跳空向下', '長黑吞噬', '空頭排列', '季線以下'
 ]
 
 ORGANIZATION = 'config/organization.csv'
@@ -71,8 +70,6 @@ class All():
 
         wave_days = stock.continuous_trend_days(stock.wave)
         trend_days = stock.continuous_trend_days(stock.trend)
-        wave_days
-        print(trend_days)
 
         check = [
             stock.sid,
@@ -138,6 +135,9 @@ class All():
                 stock.up_kd(),
                 stock.up_macd(),
                 stock.up_bollinger(),
+                stock.long(),
+                stock.up_session(),
+                None,
                 None,
                 None,
                 None,
@@ -151,13 +151,14 @@ class All():
                 None,
                 None,
                 None,
+                None,
+                None,
                 stock.down_three_line(),
-                stock.long_down(),
                 stock.down_jump_line(),
-                stock.short()
+                stock.long_down(),
+                stock.short(),
+                stock.down_session()
             ]
-
-        check = check + ['https://histock.tw/stock/tv/tvchart.aspx?no='+str(sid)]
         
         return (stock.sid, pd.Series(check, index=INDEX))
 
