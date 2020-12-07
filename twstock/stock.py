@@ -75,12 +75,24 @@ class WantgooFetcher(BaseFetcher):
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
+            lending_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/marging-trading/historical-lending-balance',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
+            borrowing_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/marging-trading/historical-borrowing-balance',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
             try:
                 info = company_profile_response.json()
                 self.total_stock = info['outstandingShares'] / 1000.0 if type(info) is dict else 1.0
                 candlesticks = candlesticks_response.json()[::-1]
                 institutional_investors = institutional_investors_response.json()[::-1]
                 major_investors = major_investors_response.json()[::-1]
+                lending = lending_response.json()[::-1]
+                borrowing = borrowing_response.json()[::-1]
             except JSONDecodeError:
                 continue
             else:
@@ -91,12 +103,14 @@ class WantgooFetcher(BaseFetcher):
             candlesticks = []
             institutional_investors = []
             major_investors = []
+            lending = []
+            borrowing = []
 
         print(self.total_stock)
 
-        return self.purify(candlesticks, major_investors, institutional_investors)
+        return self.purify(candlesticks, major_investors, institutional_investors, lending, borrowing)
 
-    def purify(self, candlesticks, major_investors, institutional_investors):
+    def purify(self, candlesticks, major_investors, institutional_investors, lending, borrowing):
         candlesticks_data = pd.DataFrame(candlesticks, columns=['volume', 'open', 'close', 'high', 'low'])
         candlesticks_data['date'] = [datetime.datetime.fromtimestamp(d['tradeDate']/1000) for d in candlesticks]
 
@@ -113,8 +127,18 @@ class WantgooFetcher(BaseFetcher):
             .rename(columns={"stockAgentMainPower": "major_investors", "stockAgentDiff": "agent_diff"}))
         major_investors_data['date'] = [datetime.datetime.strptime(d['date'], '%Y-%m-%dT%H:%M:%S') for d in major_investors]
 
+        lending_data = (pd.DataFrame(lending, columns=['date', 'lendingBalance', 'limit'])
+            .rename(columns={"lendingBalance": "lending_balance", "limit": "balance_limit"}))
+        lending_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in lending]
+
+        borrowing_data = (pd.DataFrame(borrowing, columns=['date', 'borrowingBalance'])
+            .rename(columns={"borrowingBalance": "borrowing_balance"}))
+        borrowing_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in borrowing]
+
         data = pd.merge(candlesticks_data, institutional_investors_data, how='left', on=['date'])
         data = pd.merge(data, major_investors_data, how='left', on=['date'])
+        data = pd.merge(data, lending_data, how='left', on=['date'])
+        data = pd.merge(data, borrowing_data, how='left', on=['date'])
 
         data = data.assign(investment_trust_holding_rate=round(data['ingHolding'].astype(float) / self.total_stock * 100, 2))
         data = (data.assign(dealer_holding_rate=round(data['sum_holding_rate'].astype(float) - data['foreign_holding_rate'].astype(float) - data['investment_trust_holding_rate'].astype(float), 2),
@@ -127,7 +151,8 @@ class WantgooFetcher(BaseFetcher):
         return data[[
             'date', 'volume', 'open', 'close', 'high', 'low',
             'foreign', 'investment_trust', 'dealer', 'sum_holding_rate', 'foreign_holding_rate', 'investment_trust_holding_rate', 'dealer_holding_rate',
-            'major_investors', 'agent_diff', 'skp5', 'skp20'
+            'major_investors', 'agent_diff', 'skp5', 'skp20',
+            'lending_balance', 'borrowing_balance', 'balance_limit'
         ]]
 
     def getAllStockList(self, retry: int=5):
@@ -288,7 +313,6 @@ class Stock(analytics.Analytics):
                         low = False
 
                 low_point = i
-        print(high, low)
 
         if high is True:
             trend[high_point] = 3
@@ -431,3 +455,15 @@ class Stock(analytics.Analytics):
     @property
     def three_line_diff(self):
         return self.data.three_line_diff.values
+
+    @property
+    def lending_balance(self):
+        return self.data.lending_balance.values
+
+    @property
+    def borrowing_balance(self):
+        return self.data.borrowing_balance.values
+
+    @property
+    def balance_limit(self):
+        return self.data.balance_limit.values[-2]

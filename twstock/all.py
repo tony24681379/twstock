@@ -12,13 +12,16 @@ from twstock.stock import WantgooFetcher
 INDEX = [
     'id',
     '收盤價', '漲跌幅', '成交量',
+    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
     '本日外本比', '本週外本比', '本月外本比', '外資佔比',
     '本日投本比', '本週投本比', '本月投本比', '投信佔比',
     '本日自本比', '本週自本比', '本月自本比', '自營商佔比',
     '三大法人佔比',
     '本日主力買賣超', '本週主力買賣超', '本月主力買賣超',
     '本日買賣家數差', '本週籌碼集中度', '本月籌碼集中度',
-    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
+    '本日融資餘額比', '本週融資餘額比', '本月融資餘額比',
+    '本日融券餘額比', '本週融券餘額比', '本月融券餘額比', 
+    '本日券資比', '本週券資比', '本月券資比',
     '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌',
     '三線合一向下', '長黑吞噬', '跳空向下', '空頭',
     'URL'
@@ -76,6 +79,12 @@ class All():
             stock.close[-1], 
             stock.change[-1],
             stock.volume[-1],
+
+            wave_days,
+            stock.calc_change(stock.close[-1], stock.close[-1 * abs(wave_days)]),
+            trend_days,
+            stock.calc_change(stock.close[-1], stock.close[-1 * abs(trend_days)]),
+
             stock.foreign[-1] if stock.foreign[-1] != 0 else None,
             self.sum_days(stock.foreign ,5),
             self.sum_days(stock.foreign ,20),
@@ -92,17 +101,34 @@ class All():
             stock.dealer_holding_rate[-1],
             stock.sum_holding_rate[-1],
 
-            stock.major_investors[-1]/1000 if stock.major_investors[-1] != 0 else None,
+            stock.major_investors[-1] if stock.major_investors[-1] != 0 else None,
             self.sum_days(stock.major_investors ,5),
             self.sum_days(stock.major_investors ,20),
             stock.agent_diff[-1],
             stock.skp5[-1],
             stock.skp20[-1],
-            wave_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * abs(wave_days)]),
-            trend_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * abs(trend_days)])
         ]
+
+        if stock.balance_limit != 0:
+            # to avoid 0
+            lending_balance_today = stock.lending_balance[-1] if stock.lending_balance[-1] != 0 else stock.lending_balance[-2]
+            borrowing_balance_today = stock.borrowing_balance[-1] if stock.borrowing_balance[-1] != 0 else stock.borrowing_balance[-2]
+
+            check = check + [
+                round(lending_balance_today / stock.balance_limit * 100, 2),
+                round(stock.lending_balance[-5] / stock.balance_limit * 100, 2),
+                round(stock.lending_balance[-20] / stock.balance_limit * 100, 2),
+
+                round(borrowing_balance_today / stock.balance_limit * 100, 2),
+                round(stock.borrowing_balance[-5] / stock.balance_limit * 100, 2),
+                round(stock.borrowing_balance[-20] / stock.balance_limit * 100, 2),
+
+                round(borrowing_balance_today / lending_balance_today * 100, 2),
+                round(stock.borrowing_balance[-5] / stock.lending_balance[-5] * 100, 2),
+                round(stock.borrowing_balance[-20] / stock.lending_balance[-20] * 100, 2)
+            ]
+        else:
+            check = check + [None , None, None, None, None, None, None, None, None]
 
         if stock.wave[-1] > 0:
             check = check + [
