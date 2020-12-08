@@ -78,9 +78,9 @@ class All():
             stock.volume[-1],
 
             wave_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * abs(wave_days)]),
+            stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
             trend_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * abs(trend_days)]),
+            stock.calc_change(stock.close[-1], stock.close[-1 * (abs(trend_days) + 1)]),
 
             stock.foreign[-1] if stock.foreign[-1] != 0 else None,
             self.sum_days(stock.foreign ,5),
