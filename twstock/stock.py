@@ -274,11 +274,6 @@ class Stock(analytics.Analytics):
                     low = self.low[i]
                     day = i
 
-        if wave[-1] == 1 and is_up is True:
-            wave[-1] = 2
-        if wave[-1] == -1 and is_up is False:
-            wave[-1] = -2
-
         trend = []
         high_point = 0
         low_point = 0
@@ -316,10 +311,10 @@ class Stock(analytics.Analytics):
 
         if high is True:
             trend[high_point] = 3
-            trend[-1] = 3
+            trend[-1] = 3 if self.close[-1] < self.close[low_point] else -3
         if low is True:
             trend[low_point] = -3
-            trend[-1] = -3
+            trend[-1] = 3 if self.close[-1] > self.close[high_point] else -3
 
         for i in range(2, len(trend) - 1):
             if trend[-i] == 0:
