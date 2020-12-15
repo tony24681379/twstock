@@ -274,47 +274,61 @@ class Stock(analytics.Analytics):
                     low = self.low[i]
                     day = i
 
+        if wave[-1] == 1:
+            wave[-1] = 2
+        if wave[-1] == -1:
+            wave[-1] = -2
+
         trend = []
         high_point = 0
         low_point = 0
         high = False
         low = False
+        last_high_point = 0
+        last_low_point = 0
         for i in range(0, len(wave)):
             trend.append(0)
             if wave[i] == 2:
-                if self.high[i] > self.high[high_point]:
+                if self.close[i] > self.close[high_point]:
                     high = True
                     if low is True:
                         trend[low_point] = -3
+                        last_low_point = low_point
                         low = False
                 else:
                     low = True
                     if high is True:
                         trend[high_point] = 3
+                        last_high_point = high_point
                         high = False
 
                 high_point = i
 
             if wave[i] == -2:
-                if self.low[i] < self.low[low_point]:
+                if self.close[i] < self.close[low_point]:
                     low = True
                     if high is True:
                         trend[high_point] = 3
+                        last_high_point = high_point
                         high = False
                 else:
                     high = True
                     if low is True:
                         trend[low_point] = -3
+                        last_low_point = low_point
                         low = False
 
                 low_point = i
 
-        if high is True:
+        if high is True and self.close[high_point] > self.close[last_high_point]:
             trend[high_point] = 3
-            trend[-1] = 3 if self.close[-1] < self.close[low_point] else -3
-        if low is True:
+        if low is True and self.close[low_point] < self.close[last_low_point]:
             trend[low_point] = -3
-            trend[-1] = 3 if self.close[-1] > self.close[high_point] else -3
+        if trend[-1] == 0:
+            for i in range(2, len(trend)):
+                if trend[-i] != 0:
+                    trend[-1] = trend[-i]
+                    break
 
         for i in range(2, len(trend) - 1):
             if trend[-i] == 0:
