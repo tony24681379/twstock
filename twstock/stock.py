@@ -88,6 +88,7 @@ class WantgooFetcher(BaseFetcher):
             try:
                 info = company_profile_response.json()
                 self.total_stock = info['outstandingShares'] / 1000.0 if type(info) is dict else 1.0
+                self.capital = round(info['outstandingShares'] / 100000000.0, 2) if type(info) is dict else 1.0
                 candlesticks = candlesticks_response.json()[::-1]
                 institutional_investors = institutional_investors_response.json()[::-1]
                 major_investors = major_investors_response.json()[::-1]
@@ -105,8 +106,6 @@ class WantgooFetcher(BaseFetcher):
             major_investors = []
             lending = []
             borrowing = []
-
-        print(self.total_stock)
 
         return self.purify(candlesticks, major_investors, institutional_investors, lending, borrowing)
 
@@ -146,10 +145,11 @@ class WantgooFetcher(BaseFetcher):
             investment_trust=round(data['investment_trust'].astype(float) / self.total_stock  * 100, 2),
             dealer=round((data['sumDealerBySelf'] + data['sumDealerHedging']).astype(float) / self.total_stock * 100, 2)
         ))
+        data['capital'] = self.capital
         data = data.fillna(0.0)
 
         return data[[
-            'date', 'volume', 'open', 'close', 'high', 'low',
+            'date', 'volume', 'open', 'close', 'high', 'low', 'capital',
             'foreign', 'investment_trust', 'dealer', 'sum_holding_rate', 'foreign_holding_rate', 'investment_trust_holding_rate', 'dealer_holding_rate',
             'major_investors', 'agent_diff', 'skp5', 'skp20',
             'lending_balance', 'borrowing_balance', 'balance_limit'
@@ -364,6 +364,10 @@ class Stock(analytics.Analytics):
     @property
     def change(self):
         return self.data.change.values
+
+    @property
+    def capital(self):
+        return self.data.capital.values
 
     @property
     def macd(self):

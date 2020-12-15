@@ -11,7 +11,7 @@ from twstock.stock import WantgooFetcher
 
 INDEX = [
     'id',
-    '收盤價', '漲跌幅', '成交量',
+    '收盤價', '漲跌幅', '成交量', '資本額',
     '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
     '本日外本比', '本週外本比', '本月外本比', '外資佔比',
     '本日投本比', '本週投本比', '本月投本比', '投信佔比',
@@ -76,6 +76,7 @@ class All():
             stock.close[-1], 
             stock.change[-1],
             stock.volume[-1],
+            stock.capital[-1],
 
             wave_days,
             stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
