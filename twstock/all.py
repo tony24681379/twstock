@@ -22,8 +22,8 @@ INDEX = [
     '本日融資餘額比', '本週融資餘額比', '本月融資餘額比',
     '本日融券餘額比', '本週融券餘額比', '本月融券餘額比', 
     '本日券資比', '本週券資比', '本月券資比',
-    '三線合一向上', '跳空向上', '長紅吞噬', 'KD向上', 'MACD>0', '布林通道上軌', '多頭排列', '季線以上',
-    '三線合一向下', '跳空向下', '長黑吞噬', '空頭排列', '季線以下'
+    '三線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', '多頭排列', '季線以上',
+    '三線合一向下', '跳空向下', '長黑吞噬', '5 20死亡交叉', '空頭排列', '季線以下'
 ]
 
 ORGANIZATION = 'config/organization.csv'
@@ -133,6 +133,7 @@ class All():
                 stock.up_three_line(),
                 stock.up_jump_line(),
                 stock.long_up(),
+                stock.up_cross_ma5_ma20(),
                 stock.up_kd(),
                 stock.up_macd(),
                 stock.up_bollinger(),
@@ -142,7 +143,8 @@ class All():
                 None,
                 None,
                 None,
-                None
+                stock.short(),
+                stock.down_session()
             ]
         else:
             check = check + [
@@ -153,10 +155,12 @@ class All():
                 None,
                 None,
                 None,
-                None,
+                stock.long(),
+                stock.up_session(),
                 stock.down_three_line(),
                 stock.down_jump_line(),
                 stock.long_down(),
+                stock.down_cross_ma5_ma20(),
                 stock.short(),
                 stock.down_session()
             ]
