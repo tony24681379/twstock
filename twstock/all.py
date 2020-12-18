@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import itertools
 import time
 import os
@@ -50,11 +52,14 @@ class All():
 
         results = pool.map(self.getStock, map(lambda l: l['id'], self.list))
 
-        self.data = pd.merge(pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']], pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id'])
-        self.data = pd.merge(self.data, pd.DataFrame(dict(results)).T, on=['id']).rename(columns={"id": "股票代碼", "name": "股票名稱", "industry.shortName": "產業"})
+        list_data = pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']]
+
+        data = pd.merge(list_data, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id'])
+        data = pd.merge(data, pd.DataFrame(dict(results)).T, on=['id']).rename(columns={"id": "股票代碼", "name": "股票名稱", "industry.shortName": "產業"})
         endTime = time.time()
         print(endTime - startTime)
-        self.data.to_excel(date.today().strftime("%Y%m%d") + '.xlsx', sheet_name='Sheet1', index=False)
+        with pd.ExcelWriter(date.today().strftime("%Y%m%d") + '.xlsx') as writer:
+            data.to_excel(writer, sheet_name='技術籌碼', index=False)
 
     def sum_days(self, data, days):
         result = sum(data[days * -1:])
@@ -76,7 +81,7 @@ class All():
             stock.close[-1], 
             stock.change[-1],
             stock.volume[-1],
-            stock.capital[-1],
+            stock.info.capital,
 
             wave_days,
             stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
@@ -164,7 +169,7 @@ class All():
                 stock.short(),
                 stock.down_session()
             ]
-        
+
         return (stock.sid, pd.Series(check, index=INDEX))
 
 def init(l):
