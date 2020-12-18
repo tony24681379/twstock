@@ -158,7 +158,7 @@ class WantgooFetcher(BaseFetcher):
             'lending_balance', 'borrowing_balance', 'balance_limit'
         ]]
 
-    def getAllStockList(self, retry: int=5):
+    def get_all_stock_list(self, retry: int=5):
         for retry_i in range(retry):
             r = requests.get(self.REPORT_URL + 'investrue/all-alive',
                 headers = self.HEADERS,

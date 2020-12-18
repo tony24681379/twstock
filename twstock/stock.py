@@ -56,8 +56,8 @@ class Stock(analytics.Analytics):
     def to_csv(self, path, data):
         data.to_csv(path)
 
-    def getAllStockList(self):
-        return self.fetcher.getAllStockList()
+    def get_all_stock_list(self):
+        return self.fetcher.get_all_stock_list()
 
     def fetch_info(self):
         return self.fetcher.fetch_info(self.sid)

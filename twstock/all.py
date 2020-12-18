@@ -36,21 +36,18 @@ class All():
 
         # Init data
         if initial_fetch:
-            self.getAllStockList()
+            self.get_all_stock_list()
 
-    def getAllStockList(self):
-        self.list = self.fetcher.getAllStockList()
+    def get_all_stock_list(self):
+        self.list = self.fetcher.get_all_stock_list()
 
-    def getStockList(self):
-        return self.list
-
-    def getAllStockParall(self):
+    def get_all_stock_parall(self):
         startTime = time.time()
         cpuCount = os.cpu_count()
 
         pool = Pool(cpuCount*3)
 
-        results = pool.map(self.getStock, map(lambda l: l['id'], self.list))
+        results = pool.map(self.get_stock, map(lambda l: l['id'], self.list))
 
         list_data = pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']]
 
@@ -65,7 +62,7 @@ class All():
         result = sum(data[days * -1:])
         return result if result != 0 else None
 
-    def getStock(self, sid: int):
+    def get_stock(self, sid: int):
         stock = Stock(sid)
 
         print(stock.sid)
