@@ -10,7 +10,7 @@ from collections import namedtuple
 conter_tuple = namedtuple('counter',('index', 'is_up'))
 
 class Analytics(object):
-    length = 30
+    length = 15
 
     def continuous(self, data):
         diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]

@@ -42,7 +42,6 @@ class WantgooFetcher(BaseFetcher):
             try:
                 company_profile = company_profile_response.json()
                 outstanding_shares = company_profile['outstandingShares'] if type(company_profile) is dict else 1.0
-                total_stock = company_profile['outstandingShares'] / 1000.0 if type(company_profile) is dict else 1.0
                 eps = eps_response.json()
             except JSONDecodeError:
                 continue
@@ -52,12 +51,14 @@ class WantgooFetcher(BaseFetcher):
             # Fail in all retries
             print(sid + 'info fail')
 
-
+        eps = pd.Series({str(e['year'])+'/'+str(e['season'])+'Q': e['beps'] for e in eps})
         self.info = {
+            'id': sid,
+            'capital': 1.0,
             'outstanding_shares': outstanding_shares,
-            'total_stock': total_stock
+            'PER': sum(eps[:4]) if len(eps) >= 4 else None
         }
-        self.info.update({str(e['year'])+'/'+str(e['season'])+'Q': e['beps'] for e in eps})
+        self.info.update(eps)
         self.info = pd.Series(self.info)
         return self.info
 

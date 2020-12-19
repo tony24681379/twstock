@@ -51,7 +51,10 @@ class Stock(analytics.Analytics):
         self.calc_base()
 
     def read_csv(self, path, is_squeeze: bool=False):
-        return pd.read_csv(path, index_col=0, parse_dates=True, squeeze=is_squeeze)
+        if is_squeeze:
+            return pd.read_csv(path, index_col=0, squeeze=is_squeeze, dtype='object')
+        else:
+            return pd.read_csv(path, index_col=0, parse_dates=True)
 
     def to_csv(self, path, data):
         data.to_csv(path)
@@ -63,13 +66,15 @@ class Stock(analytics.Analytics):
         return self.fetcher.fetch_info(self.sid)
 
     def fetch_daily(self, num):
-        return self.fetcher.fetch_daily(self.sid, num, self.info_data.total_stock)
+        return self.fetcher.fetch_daily(self.sid, num, float(self.info_data.outstanding_shares)/1000)
 
     def calc_change(self, after, before):
         return round((after - before)/before * 100, 2)
 
     def calc_base(self):
-        self.info_data['capital'] = round(self.info_data.outstanding_shares * self.close[-1] / 100000000, 2)
+        self.info_data['capital'] = round(self.close[-1] * float(self.info_data.outstanding_shares) / 100000000, 2)
+        self.info_data['PER'] = round(self.close[-1] / float(self.info_data['PER']), 2) if self.info_data['PER'] is not None else None
+
         bollinger_upper, _, bollinger_lower = talib.BBANDS(self.close, 20)
         k9, d9 = talib.STOCH(self.high, self.low, self.close)
         macd, macdsignal, macdhist = talib.MACD(self.close)

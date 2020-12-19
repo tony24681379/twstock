@@ -14,7 +14,9 @@ from twstock.stock import WantgooFetcher
 INDEX = [
     'id',
     '收盤價', '漲跌幅', '成交量', '資本額',
-    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
+    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅'
+]
+SKILL_INDEX = [
     '本日外本比', '本週外本比', '本月外本比', '外資佔比',
     '本日投本比', '本週投本比', '本月投本比', '投信佔比',
     '本日自本比', '本週自本比', '本月自本比', '自營商佔比',
@@ -27,6 +29,10 @@ INDEX = [
     '三線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', '多頭排列', '季線以上',
     '三線合一向下', '跳空向下', '長黑吞噬', '5 20死亡交叉', '空頭排列', '季線以下'
 ]
+
+INDEX_COLUMN = {'id': '股票代碼'}
+NAME_COLUMN = {'name': '股票名稱', 'industry.shortName': '產業'}
+INFO_COLUMN = {'outstanding_shares': '發行股數'}
 
 ORGANIZATION = 'config/organization.csv'
 
@@ -48,15 +54,25 @@ class All():
         pool = Pool(cpuCount*3)
 
         results = pool.map(self.get_stock, map(lambda l: l['id'], self.list))
+        skill_list = {}
+        info_list = {}
+        for (id, skill, info) in iter(results):
+            skill_list[id] = skill
+            info_list[id] = info
+        
+        stock_list = pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']]
+        stock_list = pd.merge(stock_list, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id']).rename(columns=NAME_COLUMN)
+        skill_list = pd.merge(stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
+        info_list = (pd.merge(skill_list.iloc[:, :12], pd.DataFrame(dict(info_list)).T, on=['id'])
+            .rename(columns=INFO_COLUMN))
 
-        list_data = pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']]
+        del info_list['capital']
 
-        data = pd.merge(list_data, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id'])
-        data = pd.merge(data, pd.DataFrame(dict(results)).T, on=['id']).rename(columns={"id": "股票代碼", "name": "股票名稱", "industry.shortName": "產業"})
         endTime = time.time()
         print(endTime - startTime)
-        with pd.ExcelWriter(date.today().strftime("%Y%m%d") + '.xlsx') as writer:
-            data.to_excel(writer, sheet_name='技術籌碼', index=False)
+        with pd.ExcelWriter(date.today().strftime('%Y%m%d') + '.xlsx') as writer:
+            skill_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='技術籌碼', index=False)
+            info_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='基本面', index=False)
 
     def sum_days(self, data, days):
         result = sum(data[days * -1:])
@@ -68,7 +84,7 @@ class All():
         print(stock.sid)
 
         if len(stock.close) < 60:
-            return (stock.sid, pd.Series(index=INDEX))
+            return (stock.sid, pd.Series(index=INDEX + SKILL_INDEX), stock.info)
 
         wave_days = stock.continuous_trend_days(stock.wave)
         trend_days = stock.continuous_trend_days(stock.trend)
@@ -167,7 +183,7 @@ class All():
                 stock.down_session()
             ]
 
-        return (stock.sid, pd.Series(check, index=INDEX))
+        return (stock.sid, pd.Series(check, index=INDEX + SKILL_INDEX), stock.info)
 
 def init(l):
     global lock
