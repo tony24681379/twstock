@@ -10,7 +10,7 @@ from collections import namedtuple
 conter_tuple = namedtuple('counter',('index', 'is_up'))
 
 class Analytics(object):
-    length = 15
+    length = 30
 
     def continuous(self, data):
         diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]
@@ -103,7 +103,7 @@ class Analytics(object):
 
     def down_three_line(self):
         for i in range(2, self.length):
-            print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
             if self.change[-i+1] < -1.5 and self.close[-i+1] < self.open[-i+1] and self.close[-i+1] < self.close[-i]:
                 if self.close[-i+1] < 20:
                     if self.three_line_diff[-i] <= 0.02:
@@ -119,14 +119,12 @@ class Analytics(object):
             if self.volume[-i+1] > 300 and self.volume[-i+1] > self.volume[-i] * 2:
                 if self.change[-i+1] > 3 and self.close[-i+1] > self.open[-i+1]:
                     if self.low[-i+1] > self.high[-i]:
-                        print(self.sid, self.date[-i+1], '跳空向上')
                         return self.date[-i+1]
 
     def down_jump_line(self):
         for i in range(2, self.length):
                 if self.change[-i+1] < -3 and self.close[-i+1] < self.open[-i+1]:
                     if self.high[-i+1] < self.low[-i]:
-                        print(self.sid, self.date[-i+1], '跳空向下')
                         return self.date[-i+1]
 
     def up_macd(self):
@@ -135,7 +133,6 @@ class Analytics(object):
                 if self.change[-i+1] > 0 and self.close[-i+1] > self.open[-i+1]:
                     if self.macdsignal[-i+1] > self.macdsignal[-i] and self.macd[-i+1] > self.macd[-i]:
                         if self.macdsignal[-i+1] > 0 and self.macdsignal[-i] < 0:
-                            print(self.sid, self.date[-i+1], '站上MACD')
                             return self.date[-i+1]
 
     def up_kd(self):
@@ -144,7 +141,6 @@ class Analytics(object):
                 if self.change[-i+1] > 0:
                     if self.k9[-i+1] > self.k9[-i]:
                         if self.k9[-i+1] > self.d9[-i+1] and self.k9[-i] < self.d9[-i]:
-                            print(self.sid, self.date[-i+1], 'KD20向上')
                             return self.date[-i+1]
 
     def up_bollinger(self):
@@ -163,7 +159,6 @@ class Analytics(object):
             if self.change[-i+1] > 3:
                 if self.close[-i+1] > self.open[-i+1] and self.close[-i] < self.open[-i]:
                     if self.close[-i] > self.open[-i+1] and self.open[-i] < self.close[-i+1]:
-                        print(self.sid, self.date[-i+1], self.change[-i+1], '長紅吞噬')
                         return self.date[-i+1]
 
     def long_down(self):
@@ -171,7 +166,6 @@ class Analytics(object):
             if self.change[-i+1] < -3:
                 if self.close[-i+1] < self.open[-i+1] and self.close[-i] > self.open[-i]:
                     if self.close[-i] < self.open[-i+1] and self.open[-i] > self.close[-i+1]:
-                        print(self.sid, self.date[-i+1], self.change[-i+1], '長黑吞噬')
                         return self.date[-i+1]
 
     def long(self):
@@ -196,13 +190,15 @@ class Analytics(object):
 
     def up_cross_ma5_ma20(self):
         for i in range(2, self.length):
-            if self.ma5[-i] < self.ma20[-i] and self.ma5[-i+1] > self.ma20[-i+1]:
-                return self.date[-i+1]
+            if self.ma20[-i] < self.ma20[-i+1] and self.ma5[-i] < self.ma5[-i+1]:
+                if self.ma5[-i] < self.ma20[-i] and self.ma5[-i+1] > self.ma20[-i+1]:
+                    return self.date[-i+1]
 
     def down_cross_ma5_ma20(self):
         for i in range(2, self.length):
-            if self.ma5[-i] > self.ma20[-i] and self.ma5[-i+1] < self.ma20[-i+1]:
-                return self.date[-i+1]
+            if self.ma20[-i] > self.ma20[-i+1] and self.ma5[-i] > self.ma5[-i+1]:
+                if self.ma5[-i] > self.ma20[-i] and self.ma5[-i+1] < self.ma20[-i+1]:
+                    return self.date[-i+1]
     
     def continuous_trend_days(self, data):
         diff = [1 if data[-i] > 0 else -1 for i in range(1, len(data))]

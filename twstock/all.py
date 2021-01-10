@@ -146,42 +146,23 @@ class All():
         else:
             check = check + [None , None, None, None, None, None, None, None, None]
 
-        if stock.wave[-1] > 0:
-            check = check + [
-                stock.up_three_line(),
-                stock.up_jump_line(),
-                stock.long_up(),
-                stock.up_cross_ma5_ma20(),
-                stock.up_kd(),
-                stock.up_macd(),
-                stock.up_bollinger(),
-                stock.long(),
-                stock.up_session(),
-                None,
-                None,
-                None,
-                None,
-                stock.short(),
-                stock.down_session()
-            ]
-        else:
-            check = check + [
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                stock.long(),
-                stock.up_session(),
-                stock.down_three_line(),
-                stock.down_jump_line(),
-                stock.long_down(),
-                stock.down_cross_ma5_ma20(),
-                stock.short(),
-                stock.down_session()
-            ]
+        check = check + [
+            stock.up_three_line(),
+            stock.up_jump_line(),
+            stock.long_up(),
+            stock.up_cross_ma5_ma20(),
+            stock.up_kd(),
+            stock.up_macd(),
+            stock.up_bollinger(),
+            stock.long(),
+            stock.up_session(),
+            stock.down_three_line(),
+            stock.down_jump_line(),
+            stock.long_down(),
+            stock.down_cross_ma5_ma20(),
+            stock.short(),
+            stock.down_session()
+        ]
 
         return (stock.sid, pd.Series(check, index=INDEX + SKILL_INDEX), stock.info)
 
