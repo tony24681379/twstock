@@ -95,6 +95,10 @@ class Stock(analytics.Analytics):
         self.daily_data['macd'] = macd
         self.daily_data['macdsignal'] = macdsignal
         self.daily_data['macdhist'] = macdhist
+        self.daily_data['adx'] = talib.ADX(self.high, self.low, self.close, timeperiod=14)
+        self.daily_data['adxr'] = talib.ADXR(self.high, self.low, self.close, timeperiod=14)
+        self.daily_data['plus_di'] = talib.PLUS_DI(self.high, self.low, self.close, timeperiod=14)
+        self.daily_data['minus_di'] = talib.MINUS_DI(self.high, self.low, self.close, timeperiod=14)
 
         self.calc_three_line_diff()
         self.calc_trend()
@@ -289,6 +293,22 @@ class Stock(analytics.Analytics):
     @property
     def d9(self):
         return self.daily_data.d9.values
+
+    @property
+    def adx(self):
+        return self.daily_data.adx.values
+
+    @property
+    def adr(self):
+        return self.daily_data.adr.values
+    
+    @property
+    def plus_di(self):
+        return self.daily_data.plus_di.values
+    
+    @property
+    def minus_di(self):
+        return self.daily_data.minus_di.values
 
     @property
     def foreign(self):

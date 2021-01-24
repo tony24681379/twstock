@@ -199,6 +199,20 @@ class Analytics(object):
             if self.ma20[-i] > self.ma20[-i+1] and self.ma5[-i] > self.ma5[-i+1]:
                 if self.ma5[-i] > self.ma20[-i] and self.ma5[-i+1] < self.ma20[-i+1]:
                     return self.date[-i+1]
+
+    def up_dmi(self):
+        for i in range(2, self.length):
+            if self.plus_di[-i+1] > self.minus_di[-i+1]:
+                if self.adx[-i+1] - self.adx[-i] > 2:
+                    if self.plus_di[-i+1] - self.plus_di[-i] > 3:
+                        return self.date[-i+1]
+    
+    def down_dmi(self):
+        for i in range(2, self.length):
+            if self.plus_di[-i+1] < self.minus_di[-i+1]:
+                if self.adx[-i+1] - self.adx[-i] > 2:
+                    if self.minus_di[-i+1] - self.minus_di[-i] > 3:
+                        return self.date[-i+1]
     
     def continuous_trend_days(self, data):
         diff = [1 if data[-i] > 0 else -1 for i in range(1, len(data))]

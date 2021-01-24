@@ -14,7 +14,8 @@ from twstock.stock import WantgooFetcher
 INDEX = [
     'id',
     '收盤價', '漲跌幅', '成交量', '資本額',
-    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅'
+    '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
+    'K', 'D', 'ADX'
 ]
 SKILL_INDEX = [
     '本日外本比', '本週外本比', '本月外本比', '外資佔比',
@@ -26,12 +27,12 @@ SKILL_INDEX = [
     '本日融資餘額比', '本週融資餘額比', '本月融資餘額比',
     '本日融券餘額比', '本週融券餘額比', '本月融券餘額比', 
     '本日券資比', '本週券資比', '本月券資比',
-    '三線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', '多頭排列', '季線以上',
+    '三線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', 'DMI向上', '多頭排列', '季線以上',
     '三線合一向下', '跳空向下', '長黑吞噬', '5 20死亡交叉', '空頭排列', '季線以下'
 ]
 
 INDEX_COLUMN = {'id': '股票代碼'}
-NAME_COLUMN = {'name': '股票名稱', 'industry.shortName': '產業'}
+NAME_COLUMN = {'name': '股票名稱', 'industry.name': '上市/櫃', 'industry.shortName': '產業'}
 INFO_COLUMN = {'outstanding_shares': '發行股數'}
 
 ORGANIZATION = 'config/organization.csv'
@@ -60,9 +61,11 @@ class All():
             skill_list[id] = skill
             info_list[id] = info
         
-        stock_list = pd.json_normalize(self.list)[['id', 'name', 'industry.shortName']]
-        stock_list = pd.merge(stock_list, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id']).rename(columns=NAME_COLUMN)
-        skill_list = pd.merge(stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
+        self.stock_list = pd.json_normalize(self.list)[['id', 'name', 'industry.name', 'industry.shortName']].rename(columns={'industry.name': 'market'})
+        # self.stock_list['market'][]
+        # stock_list.assign(market=stock_list.market.astype(str)[-2:])
+        self.stock_list = pd.merge(self.stock_list, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id']).rename(columns=NAME_COLUMN)
+        skill_list = pd.merge(self.stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
         info_list = (pd.merge(skill_list.iloc[:, :12], pd.DataFrame(dict(info_list)).T, on=['id'])
             .rename(columns=INFO_COLUMN))
 
@@ -100,6 +103,9 @@ class All():
             stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
             trend_days,
             stock.calc_change(stock.close[-1], stock.close[-1 * (abs(trend_days) + 1)]),
+            stock.k9[-1],
+            stock.d9[-1],
+            stock.adx[-1],
 
             stock.foreign[-1] if stock.foreign[-1] != 0 else None,
             self.sum_days(stock.foreign ,5),
@@ -154,6 +160,7 @@ class All():
             stock.up_kd(),
             stock.up_macd(),
             stock.up_bollinger(),
+            stock.up_dmi(),
             stock.long(),
             stock.up_session(),
             stock.down_three_line(),
