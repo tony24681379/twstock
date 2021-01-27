@@ -89,7 +89,6 @@ class Analytics(object):
 
     def up_three_line(self):
         for i in range(2, self.length):
-            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
             if self.volume[-i+1] > 1000:
                 if self.change[-i+1] > 1.5 and self.close[-i+1] > self.open[-i+1] and self.close[-i+1] > self.close[-i]:
                     if self.close[-i+1] < 20:
@@ -103,7 +102,6 @@ class Analytics(object):
 
     def down_three_line(self):
         for i in range(2, self.length):
-            # print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
             if self.change[-i+1] < -1.5 and self.close[-i+1] < self.open[-i+1] and self.close[-i+1] < self.close[-i]:
                 if self.close[-i+1] < 20:
                     if self.three_line_diff[-i] <= 0.02:
@@ -112,6 +110,31 @@ class Analytics(object):
                 else:
                     if self.three_line_diff[-i] <= 0.01:
                         print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.three_line_diff[-i])
+                        return self.date[-i+1]
+
+    def up_four_line(self):
+        for i in range(2, self.length):
+            if self.volume[-i+1] > 1000:
+                if self.change[-i+1] > 1.5 and self.close[-i+1] > self.open[-i+1] and self.close[-i+1] > self.close[-i]:
+                    if self.close[-i+1] < 20:
+                        if self.four_line_diff[-i] <= 0.03:
+                            print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.four_line_diff[-i])
+                            return self.date[-i+1]
+                    else:
+                        if self.four_line_diff[-i] <= 0.02:
+                            print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.four_line_diff[-i])
+                            return self.date[-i+1]
+
+    def down_four_line(self):
+        for i in range(2, self.length):
+            if self.change[-i+1] < -1.5 and self.close[-i+1] < self.open[-i+1] and self.close[-i+1] < self.close[-i]:
+                if self.close[-i+1] < 20:
+                    if self.four_line_diff[-i] <= 0.02:
+                        print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.four_line_diff[-i])
+                        return self.date[-i+1]
+                else:
+                    if self.four_line_diff[-i] <= 0.01:
+                        print(self.sid, self.date[-i+1], self.change[-i+1], self.ma5[-i], self.ma10[-i], self.ma20[-i], self.four_line_diff[-i])
                         return self.date[-i+1]
 
     def up_jump_line(self):

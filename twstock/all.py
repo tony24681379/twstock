@@ -27,8 +27,8 @@ SKILL_INDEX = [
     '本日融資餘額比', '本週融資餘額比', '本月融資餘額比',
     '本日融券餘額比', '本週融券餘額比', '本月融券餘額比', 
     '本日券資比', '本週券資比', '本月券資比',
-    '三線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', 'DMI向上', '多頭排列', '季線以上',
-    '三線合一向下', '跳空向下', '長黑吞噬', '5 20死亡交叉', '空頭排列', '季線以下'
+    '三線合一向上', '四線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', 'DMI向上', '多頭排列', '季線以上',
+    '三線合一向下', '四線合一向下', '跳空向下', '長黑吞噬', '5 20死亡交叉', '空頭排列', '季線以下'
 ]
 
 INDEX_COLUMN = {'id': '股票代碼'}
@@ -154,6 +154,7 @@ class All():
 
         check = check + [
             stock.up_three_line(),
+            stock.up_four_line(),
             stock.up_jump_line(),
             stock.long_up(),
             stock.up_cross_ma5_ma20(),
@@ -164,6 +165,7 @@ class All():
             stock.long(),
             stock.up_session(),
             stock.down_three_line(),
+            stock.down_four_line(),
             stock.down_jump_line(),
             stock.long_down(),
             stock.down_cross_ma5_ma20(),

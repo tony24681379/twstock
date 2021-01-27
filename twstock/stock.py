@@ -100,12 +100,13 @@ class Stock(analytics.Analytics):
         self.daily_data['plus_di'] = talib.PLUS_DI(self.high, self.low, self.close, timeperiod=14)
         self.daily_data['minus_di'] = talib.MINUS_DI(self.high, self.low, self.close, timeperiod=14)
 
-        self.calc_three_line_diff()
+        self.calc_line_diff()
         self.calc_trend()
         self.daily_data = self.daily_data.dropna(how='any')
     
-    def calc_three_line_diff(self):
+    def calc_line_diff(self):
         three_line_diff = []
+        four_line_diff = []
         for i in range(0, len(self.close)):
             sub = (max(self.ma5[i] , self.ma10[i], self.ma20[i]) - min(self.ma5[i] , self.ma10[i], self.ma20[i]))
             avg = statistics.mean([self.ma5[i], self.ma10[i], self.ma20[i]])
@@ -114,7 +115,15 @@ class Stock(analytics.Analytics):
 
             three_line_diff.append(sub/avg)
 
+            sub = (max(self.ma5[i] , self.ma10[i], self.ma20[i], self.ma60[i]) - min(self.ma5[i] , self.ma10[i], self.ma20[i], self.ma60[i]))
+            avg = statistics.mean([self.ma5[i], self.ma10[i], self.ma20[i], self.ma60[i]])
+            if avg == 0:
+                return None
+
+            four_line_diff.append(sub/avg)
+
         self.daily_data['three_line_diff'] = three_line_diff
+        self.daily_data['four_line_diff'] = four_line_diff
 
     def calc_trend(self):
         high = -sys.maxsize-1
@@ -357,6 +366,10 @@ class Stock(analytics.Analytics):
     @property
     def three_line_diff(self):
         return self.daily_data.three_line_diff.values
+
+    @property
+    def four_line_diff(self):
+        return self.daily_data.four_line_diff.values
 
     @property
     def lending_balance(self):
