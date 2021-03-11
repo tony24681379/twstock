@@ -83,12 +83,12 @@ class WantgooFetcher(BaseFetcher):
                 proxies=get_proxies())
 
             lending_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/marging-trading/historical-lending-balance',
+                self.REPORT_URL + 'stock/' + sid + '/margin-trading/historical-lending-balance',
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
             borrowing_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/marging-trading/historical-borrowing-balance',
+                self.REPORT_URL + 'stock/' + sid + '/margin-trading/historical-borrowing-balance',
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
