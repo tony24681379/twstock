@@ -145,9 +145,9 @@ class All():
                 round(stock.borrowing_balance[-5] / stock.balance_limit * 100, 2),
                 round(stock.borrowing_balance[-20] / stock.balance_limit * 100, 2),
 
-                round(borrowing_balance_today / lending_balance_today * 100, 2),
-                round(stock.borrowing_balance[-5] / stock.lending_balance[-5] * 100, 2),
-                round(stock.borrowing_balance[-20] / stock.lending_balance[-20] * 100, 2)
+                round(borrowing_balance_today / lending_balance_today * 100, 2) if lending_balance_today != 0 else 0,
+                round(stock.borrowing_balance[-5] / stock.lending_balance[-5] * 100, 2) if stock.lending_balance[-5] != 0 else 0,
+                round(stock.borrowing_balance[-20] / stock.lending_balance[-20] * 100, 2) if stock.lending_balance[-20] != 0 else 0
             ]
         else:
             check = check + [None , None, None, None, None, None, None, None, None]

@@ -73,7 +73,7 @@ class Stock(analytics.Analytics):
 
     def calc_base(self):
         self.info_data['capital'] = round(self.close[-1] * float(self.info_data.outstanding_shares) / 100000000, 2)
-        self.info_data['PER'] = round(self.close[-1] / float(self.info_data['PER']), 2) if self.info_data['PER'] is not None else None
+        self.info_data['PER'] = round(self.close[-1] / float(self.info_data['PER']), 2) if self.info_data['PER'] is not None and float(self.info_data['PER']) != 0 else None
 
         bollinger_upper, _, bollinger_lower = talib.BBANDS(self.close, 20)
         k9, d9 = talib.STOCH(self.high, self.low, self.close)
