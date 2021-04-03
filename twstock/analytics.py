@@ -247,6 +247,25 @@ class Analytics(object):
                 break
         return cont * diff[0]
 
+    def buy_10days(self, data):
+        diff = [1 if data[-i] > 0 else -1 for i in range(1, 10)]
+        buy = 0
+
+        for v in diff:
+            if v > 0:
+                buy += 1
+ 
+        return buy
+    
+    def sell_10days(self, data):
+        diff = [1 if data[-i] >= 0 else -1 for i in range(1, 10)]
+        buy = 0
+        sell = 0
+        for v in diff:
+            if v < 0:
+                sell += 1
+        return sell
+
 class BestFourPoint(object):
     BEST_BUY_WHY = ['量大收紅', '量縮價不跌', '三日均價由下往上', '三日均價大於六日均價']
     BEST_SELL_WHY = ['量大收黑', '量縮價跌', '三日均價由上往下', '三日均價小於六日均價']
