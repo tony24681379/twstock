@@ -128,7 +128,7 @@ class WantgooFetcher(BaseFetcher):
 
         major_investors_data = (pd.DataFrame(major_investors, columns=['date', 'stockAgentMainPower', 'stockAgentDiff', 'skp5', 'skp20'])
             .rename(columns={"stockAgentMainPower": "major_investors", "stockAgentDiff": "agent_diff"}))
-        major_investors_data['date'] = [datetime.datetime.strptime(d['date'], '%Y-%m-%dT%H:%M:%S') for d in major_investors]
+        major_investors_data['date'] = [datetime.datetime.fromtimestamp(d['date']/1000) for d in major_investors]
 
         lending_data = (pd.DataFrame(lending, columns=['date', 'lendingBalance', 'limit'])
             .rename(columns={"lendingBalance": "lending_balance", "limit": "balance_limit"}))
