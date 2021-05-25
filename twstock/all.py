@@ -33,7 +33,7 @@ SKILL_INDEX = [
 
 INDEX_COLUMN = {'id': '股票代碼'}
 NAME_COLUMN = {'name': '股票名稱', 'industry.name': '上市/櫃', 'industry.shortName': '產業'}
-INFO_COLUMN = {'outstanding_shares': '發行股數'}
+INFO_COLUMN = {'outstanding_shares': '發行股數', 'cash_dividend': '現金股利', 'stock_dividend': '股票股利'}
 
 ORGANIZATION = 'config/organization.csv'
 

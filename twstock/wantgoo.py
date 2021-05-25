@@ -39,10 +39,16 @@ class WantgooFetcher(BaseFetcher):
                 headers = self.HEADERS,
                 proxies=get_proxies())
 
+            dividend_response = requests.get(
+                self.REPORT_URL + 'stock/' + sid + '/dividend-policy/ex-dividend-data',
+                headers = self.HEADERS,
+                proxies=get_proxies())
+
             try:
                 company_profile = company_profile_response.json()
                 outstanding_shares = company_profile['outstandingShares'] if type(company_profile) is dict else 1.0
                 eps = eps_response.json()
+                dividend = dividend_response.json()
             except JSONDecodeError:
                 continue
             else:
@@ -52,11 +58,21 @@ class WantgooFetcher(BaseFetcher):
             print(sid + 'info fail')
 
         eps = pd.Series({str(e['year'])+'/'+str(e['season'])+'Q': e['beps'] for e in eps})
+
+        cash_dividend = 0
+        stock_dividend = 0
+        if len(dividend) > 0:
+            if str(datetime.datetime.now().year - 2011) in dividend[0]['period']:
+                cash_dividend = round(dividend[0]['cashDividend'], 2)
+                stock_dividend = round(dividend[0]['stockDividend'], 2)
+    
         self.info = {
             'id': sid,
             'capital': 1.0,
             'outstanding_shares': outstanding_shares,
-            'PER': sum(eps[:4]) if len(eps) >= 4 else None
+            'PER': eps[:-1] if len(eps) >= 1 else None,
+            'cash_dividend': cash_dividend,
+            'stock_dividend': stock_dividend
         }
         self.info.update(eps)
         self.info = pd.Series(self.info)
