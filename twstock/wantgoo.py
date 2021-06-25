@@ -65,12 +65,12 @@ class WantgooFetcher(BaseFetcher):
             if str(datetime.datetime.now().year - 2011) in dividend[0]['period']:
                 cash_dividend = round(dividend[0]['cashDividend'], 2)
                 stock_dividend = round(dividend[0]['stockDividend'], 2)
-    
+
         self.info = {
             'id': sid,
             'capital': 1.0,
             'outstanding_shares': outstanding_shares,
-            'PER': eps[:-1] if len(eps) >= 1 else None,
+            'PER': eps[0] if len(eps) >= 1 else None,
             'cash_dividend': cash_dividend,
             'stock_dividend': stock_dividend
         }
