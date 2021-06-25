@@ -15,6 +15,7 @@ INDEX = [
     'id',
     '收盤價', '漲跌幅', '成交量', '資本額',
     '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
+    '波段高點', '高點差距', '波段低點', '低點差距',
     'K', 'D', 'ADX'
 ]
 SKILL_INDEX = [
@@ -27,6 +28,7 @@ SKILL_INDEX = [
     '本日融資餘額比', '本週融資餘額比', '本月融資餘額比',
     '本日融券餘額比', '本週融券餘額比', '本月融券餘額比', 
     '本日券資比', '本週券資比', '本月券資比',
+    '近期新高', '近期新低',
     '三線合一向上', '四線合一向上', '跳空向上', '長紅吞噬', '5 20黃金交叉', 'KD向上', 'MACD>0', '布林通道上軌', 'DMI向上', '多頭排列', '季線以上',
     '三線合一向下', '四線合一向下', '跳空向下', '長黑吞噬', '5 20死亡交叉', '空頭排列', '季線以下'
 ]
@@ -103,6 +105,10 @@ class All():
             stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
             trend_days,
             stock.calc_change(stock.close[-1], stock.close[-1 * (abs(trend_days) + 1)]),
+            stock.season_upper,
+            stock.calc_change(stock.close[-1], stock.season_upper),
+            stock.season_lower,
+            stock.calc_change(stock.close[-1], stock.season_lower),
             stock.k9[-1],
             stock.d9[-1],
             stock.adx[-1],
@@ -161,6 +167,8 @@ class All():
             check = check + [None , None, None, None, None, None, None, None, None]
 
         check = check + [
+            stock.is_upper(),
+            stock.is_lower(),
             stock.up_three_line(),
             stock.up_four_line(),
             stock.up_jump_line(),

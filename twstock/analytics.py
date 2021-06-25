@@ -264,6 +264,16 @@ class Analytics(object):
                 sell += 1
         return sell
 
+    def is_upper(self):
+        for i in range(2, self.length):
+            if self.close[-i+1] >= self.season_upper:
+                return self.date[-i+1]
+    
+    def is_lower(self):
+        for i in range(2, self.length):
+            if self.close[-i+1] <= self.season_lower:
+                return self.date[-i+1]
+
 class BestFourPoint(object):
     BEST_BUY_WHY = ['量大收紅', '量縮價不跌', '三日均價由下往上', '三日均價大於六日均價']
     BEST_SELL_WHY = ['量大收黑', '量縮價跌', '三日均價由上往下', '三日均價小於六日均價']

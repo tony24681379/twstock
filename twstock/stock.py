@@ -102,6 +102,7 @@ class Stock(analytics.Analytics):
 
         self.calc_line_diff()
         self.calc_trend()
+        self.seasson_upper_and_lower()
         self.daily_data = self.daily_data.dropna(how='any')
     
     def calc_line_diff(self):
@@ -214,6 +215,9 @@ class Stock(analytics.Analytics):
 
         self.daily_data['wave'] = wave
         self.daily_data['trend'] = trend
+    
+    def seasson_upper_and_lower(self):
+        self.season = self.daily_data[-60:].sort_values(by="close")
 
     @property
     def info(self):
@@ -382,3 +386,11 @@ class Stock(analytics.Analytics):
     @property
     def balance_limit(self):
         return self.daily_data.balance_limit.values[-2]
+
+    @property
+    def season_upper(self):
+        return self.season.close.values[-1]
+
+    @property
+    def season_lower(self):
+        return self.season.close.values[0]
