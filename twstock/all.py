@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 
-import itertools
 import time
 import os
-import statistics
 import pandas as pd
 import numpy as np
 from datetime import date
@@ -13,7 +11,7 @@ from twstock.stock import WantgooFetcher
 
 INDEX = [
     'id',
-    '收盤價', '漲跌幅', '成交量', '資本額',
+    '最高價', '最大漲幅', '最低價', '最大跌幅', '收盤價', '漲跌幅', '成交量', '資本額',
     '波段天數', '波段漲跌幅', '趨勢天數', '趨勢漲跌幅',
     '波段高點', '高點差距', '波段低點', '低點差距',
     'K', 'D', 'ADX'
@@ -95,6 +93,10 @@ class All():
 
         check = [
             stock.sid,
+            stock.high[-1],
+            stock.calc_change(stock.high[-1], stock.close[-2]),
+            stock.low[-1],
+            stock.calc_change(stock.low[-1], stock.close[-2]),
             stock.close[-1], 
             stock.change[-1],
             stock.volume[-1],
