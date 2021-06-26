@@ -67,6 +67,7 @@ class All():
         skill_list = pd.merge(self.stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
         info_list = (pd.merge(skill_list.iloc[:, :12], pd.DataFrame(dict(info_list)).T, on=['id'])
             .rename(columns=INFO_COLUMN))
+        extreme_list = skill_list[(skill_list['最大漲幅'] > 9) | (skill_list['最大跌幅'] < -9)]
 
         del info_list['capital']
 
@@ -75,6 +76,7 @@ class All():
         with pd.ExcelWriter(date.today().strftime('%Y%m%d') + '.xlsx') as writer:
             skill_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='技術籌碼', index=False)
             info_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='基本面', index=False)
+            extreme_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='極端漲跌', index=False)
 
     def sum_days(self, data, days):
         result = sum(data[days * -1:])
