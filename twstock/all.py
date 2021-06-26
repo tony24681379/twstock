@@ -34,7 +34,7 @@ SKILL_INDEX = [
 ]
 
 INDEX_COLUMN = {'id': '股票代碼'}
-NAME_COLUMN = {'name': '股票名稱', 'industry.name': '上市/櫃', 'industry.shortName': '產業'}
+NAME_COLUMN = {'name': '股票名稱', 'industries_name': '上市/櫃', 'industries_shortName': '產業'}
 INFO_COLUMN = {'outstanding_shares': '發行股數', 'cash_dividend': '現金股利', 'stock_dividend': '股票股利'}
 
 ORGANIZATION = 'config/organization.csv'
@@ -49,6 +49,9 @@ class All():
 
     def get_all_stock_list(self):
         self.list = self.fetcher.get_all_stock_list()
+        self.stock_list = pd.json_normalize(self.list, record_path='industries', record_prefix='industries_', meta=['id', 'name', 'type'])[['id', 'name', 'industries_name', 'industries_shortName']]
+        self.stock_list = self.stock_list.assign(industries_name=self.stock_list.industries_name.str[:2])
+        self.stock_list = pd.merge(self.stock_list, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id']).rename(columns=NAME_COLUMN)
 
     def get_all_stock_parall(self):
         startTime = time.time()
@@ -63,10 +66,6 @@ class All():
             skill_list[id] = skill
             info_list[id] = info
         
-        self.stock_list = pd.json_normalize(self.list)[['id', 'name', 'industry.name', 'industry.shortName']].rename(columns={'industry.name': 'market'})
-        # self.stock_list['market'][]
-        # stock_list.assign(market=stock_list.market.astype(str)[-2:])
-        self.stock_list = pd.merge(self.stock_list, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id']).rename(columns=NAME_COLUMN)
         skill_list = pd.merge(self.stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
         info_list = (pd.merge(skill_list.iloc[:, :12], pd.DataFrame(dict(info_list)).T, on=['id'])
             .rename(columns=INFO_COLUMN))
