@@ -98,5 +98,8 @@ ENV/
 # mypy
 .mypy_cache/
 
+.DS_Store
+
 /daily
 /info
+*.xlsx
