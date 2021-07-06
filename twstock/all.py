@@ -58,25 +58,72 @@ class All():
         pool = Pool(cpuCount*3)
 
         results = pool.map(self.get_stock, map(lambda l: l['id'], self.list))
+        name_list = {}
         skill_list = {}
         info_list = {}
-        for (id, skill, info) in iter(results):
+        daily_list = {}
+        category_list = self.stock_list.groupby("產業")
+
+        for (id, skill, info, daily) in iter(results):
             skill_list[id] = skill
             info_list[id] = info
+            daily_list[id] = daily
         
-        skill_list = pd.merge(self.stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
-        info_list = (pd.merge(skill_list.iloc[:, :12], pd.DataFrame(dict(info_list)).T, on=['id'])
+        for l in self.list:
+            name_list[l['id']] = l
+        
+        skill_list_excel = pd.merge(self.stock_list, pd.DataFrame(dict(skill_list)).T, on=['id'])
+        info_list_excel = (pd.merge(skill_list_excel.iloc[:, :12], pd.DataFrame(dict(info_list)).T, on=['id'])
             .rename(columns=INFO_COLUMN))
-        extreme_list = skill_list[(skill_list['最大漲幅'] > 9) | (skill_list['最大跌幅'] < -9)]
-
-        del info_list['capital']
+        extreme_list_excel = skill_list_excel[(skill_list_excel['最大漲幅'] > 9) | (skill_list_excel['最大跌幅'] < -9)]
+        del info_list_excel['capital']
 
         endTime = time.time()
         print(endTime - startTime)
+
         with pd.ExcelWriter(date.today().strftime('%Y%m%d') + '.xlsx') as writer:
-            skill_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='技術籌碼', index=False)
-            info_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='基本面', index=False)
-            extreme_list.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='極端漲跌', index=False)
+            skill_list_excel.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='技術籌碼', index=False)
+            info_list_excel.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='基本面', index=False)
+            extreme_list_excel.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='極端漲跌', index=False)
+
+        with pd.ExcelWriter(date.today().strftime('%Y%m%d') + '-graph.xlsx') as writer:
+            workbook  = writer.book
+            worksheet = workbook.add_worksheet('目錄')
+
+            worksheet.write_formula('A1', '=HYPERLINK("#技術籌碼!A1", "技術籌碼")')
+            worksheet.write_formula('A2', '=HYPERLINK("#基本面!A1", "基本面")')
+            worksheet.write_formula('A3', '=HYPERLINK("#極端漲跌!A1", "極端漲跌")')
+            i = 4
+            for category_name, category in category_list:
+                worksheet.write_formula('A'+str(i), '=HYPERLINK("#' + category_name + '!A1", "'+ category_name + '")')
+                i += 1
+
+            skill_list_excel.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='技術籌碼', index=False)
+            info_list_excel.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='基本面', index=False)
+            extreme_list_excel.rename(columns=INDEX_COLUMN).to_excel(writer, sheet_name='極端漲跌', index=False)
+
+            for category_name, category in category_list:
+                category.to_excel(writer, category_name, index=False)
+
+            for id, daily in daily_list.items():
+                daily.rename(columns=INDEX_COLUMN).to_excel(writer, id, index=False)
+
+            for category_name, category in category_list:
+                worksheet = writer.sheets[category_name]
+                chart = workbook.add_chart({'type': 'line'})
+                for _, c in category.iterrows():
+                    chart.add_series({
+                        'name': c['id'] + ' ' + c['股票名稱'],
+                        'categories': '='+c['id']+'!$A$2:$A$61',
+                        'values': '='+c['id']+'!$B$2:$B$61'
+                    })
+
+                chart.set_x_axis({'name': 'Index', 'position_axis': 'on_tick'})
+                chart.set_x_axis({'name': '日期'})
+                chart.set_size({'width': 800, 'height': 600})
+
+                worksheet.insert_chart('F3', chart)
+                worksheet.write_formula('G1', '=HYPERLINK("#目錄!A1", "回目錄")')
 
     def sum_days(self, data, days):
         result = sum(data[days * -1:])
@@ -88,7 +135,7 @@ class All():
         print(stock.sid)
 
         if len(stock.close) < 60:
-            return (stock.sid, pd.Series(index=INDEX + SKILL_INDEX), stock.info)
+            return (stock.sid, pd.Series(index=INDEX + SKILL_INDEX), stock.info, pd.DataFrame({}))
 
         wave_days = stock.continuous_trend_days(stock.wave)
         trend_days = stock.continuous_trend_days(stock.trend)
@@ -192,7 +239,14 @@ class All():
             stock.down_session()
         ]
 
-        return (stock.sid, pd.Series(check, index=INDEX + SKILL_INDEX), stock.info)
+        daily = pd.DataFrame(
+            {
+                'date': stock.date[-60:],
+                'close': stock.close[-60:],
+                'volume': stock.volume[-60:],
+            })
+
+        return (stock.sid, pd.Series(check, index=INDEX + SKILL_INDEX), stock.info, daily)
 
 def init(l):
     global lock

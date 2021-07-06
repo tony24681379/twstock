@@ -193,5 +193,5 @@ class WantgooFetcher(BaseFetcher):
             print('fail')
             data = []
 
-        filtered = filter(lambda l: l['type'] in ['Stock', 'ETF'], data)
+        filtered = filter(lambda l: l['type'] in ['Index', 'Stock', 'ETF'], data)
         return list(filtered)
