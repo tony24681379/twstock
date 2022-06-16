@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import time
-import os
 import pandas as pd
-import numpy as np
+import asyncio
 from datetime import date
 from multiprocessing import Pool
 from twstock import Stock
@@ -38,33 +37,58 @@ INFO_COLUMN = {'outstanding_shares': '發行股數', 'cash_dividend': '現金股
 ORGANIZATION = 'config/organization.csv'
 
 class All():
-    def __init__(self, initial_fetch: bool = True):
+    def __init__(self):
         self.fetcher = WantgooFetcher()
 
-        # Init data
-        if initial_fetch:
-            self.get_all_stock_list()
-
-    def get_all_stock_list(self):
-        self.list = self.fetcher.get_all_stock_list()
+    async def get_all_stock_list(self):
+        self.list = await self.fetcher.get_all_stock_list()
         self.stock_list = pd.json_normalize(self.list, record_path='industries', record_prefix='industries_', meta=['id', 'name', 'type'])[['id', 'name', 'industries_name', 'industries_shortName']]
         self.stock_list = self.stock_list.assign(industries_name=self.stock_list.industries_name.str[:2])
         self.stock_list = pd.merge(self.stock_list, pd.read_csv(ORGANIZATION, dtype={'id': object, '集團': object}), how='left', on=['id']).rename(columns=NAME_COLUMN)
 
-    def get_all_stock_parall(self):
+    async def consumer(self, q):
+        try:
+            while True:
+                id = await q.get()
+                result = await self.get_stock(id)
+                self.results.append(result)
+                q.task_done()
+
+        except asyncio.CancelledError:
+            pass
+
+    async def get_all_stock_parall(self):
         startTime = time.time()
-        cpuCount = os.cpu_count()
 
-        pool = Pool(cpuCount*3)
+        self.results = []
+        # self.results = [self.get_stock(l['id']) for l in self.list]
+        # self.results = await asyncio.gather(*results)
 
-        results = pool.map(self.get_stock, map(lambda l: l['id'], self.list))
+        self.results = [await self.get_stock(l['id'].lower()) for l in self.list]
+
+        # pool = 10
+        
+        # q = asyncio.Queue(maxsize=pool)
+
+        # consumers = [
+        #     asyncio.create_task(self.consumer(q)) for i in range(pool)
+        # ]
+        
+        # for l in self.list:
+        #     await q.put(l['id'])
+
+        # await q.join()
+
+        # for c in consumers:
+        #     c.cancel()
+
         name_list = {}
         skill_list = {}
         info_list = {}
         daily_list = {}
         category_list = self.stock_list.groupby("產業")
 
-        for (id, skill, info, daily) in iter(results):
+        for (id, skill, info, daily) in iter(self.results):
             skill_list[id] = skill
             info_list[id] = info
             daily_list[id] = daily
@@ -129,8 +153,10 @@ class All():
         result = sum(data[days * -1:])
         return result if result != 0 else None
 
-    def get_stock(self, sid: int):
+    async def get_stock(self, sid: int):
         stock = Stock(sid)
+
+        await stock.load_data()
 
         print(stock.sid)
 

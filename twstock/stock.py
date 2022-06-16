@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 
-import sys
-import datetime
+import asyncio
 # import urllib.parse
 import os
 import statistics
-import pandas as pd
+import sys
 from threading import Lock
+
+import time
+import pandas as pd
 import talib
-from twstock.wantgoo import WantgooFetcher
 from talib import MA_Type
+
+from twstock.wantgoo import WantgooFetcher
 
 try:
     from . import analytics
@@ -26,47 +29,58 @@ INFO_PATH = 'info/'
 DAILY_PATH = 'daily/'
 
 class Stock(analytics.Analytics):
-    def __init__(self, sid: str, load_data: bool=True):
+    def __init__(self, sid: str):
         self.sid = sid
         self.fetcher = WantgooFetcher()
         self.info_path = INFO_PATH + self.sid + ".csv"
-        self.daily_path = DAILY_PATH + self.sid + ".csv"
+        self.daily_path = DAILY_PATH + self.sid + ".feather"
 
+    async def load_data(self, load_data: bool=True):
         if load_data:
             if os.path.isfile(self.info_path):
                 self.info_data = self.read_csv(self.info_path, True)
             else:
-                self.info_data = self.fetch_info()
+                self.info_data = await self.fetch_info()
                 self.to_csv(self.info_path, self.info_data)
 
             if os.path.isfile(self.daily_path):
-                self.daily_data = self.read_csv(self.daily_path)
+                self.daily_data = self.read_feather(self.daily_path)
             else:
-                self.daily_data = self.fetch_daily(490)
-                self.to_csv(self.daily_path, self.daily_data)
+                self.daily_data = await self.fetch_daily(490)
+                self.to_feather(self.daily_path, self.daily_data)
 
         if len(self.close) == 0:
             return
+        self.daily_data = self.daily_data[::-1]
 
         self.calc_base()
 
     def read_csv(self, path, is_squeeze: bool=False):
         if is_squeeze:
-            return pd.read_csv(path, index_col=0, squeeze=is_squeeze, dtype='object')
+            return pd.read_csv(path, index_col=0, dtype='object').squeeze("columns")
         else:
             return pd.read_csv(path, index_col=0, parse_dates=True)
 
     def to_csv(self, path, data):
         data.to_csv(path)
 
-    def get_all_stock_list(self):
-        return self.fetcher.get_all_stock_list()
+    def read_feather(self, path, is_squeeze: bool=False):
+        if is_squeeze:
+            return pd.read_feather(path)
+        else:
+            return pd.read_feather(path)
+
+    def to_feather(self, path, data):
+        data.to_feather(path)
+
+    async def get_all_stock_list(self):
+        return await self.fetcher.get_all_stock_list()
 
     def fetch_info(self):
         return self.fetcher.fetch_info(self.sid)
 
-    def fetch_daily(self, num):
-        return self.fetcher.fetch_daily(self.sid, num, float(self.info_data.outstanding_shares)/1000)
+    async def fetch_daily(self, num):
+        return await self.fetcher.fetch_daily(self.sid, num, float(self.info_data.outstanding_shares)/1000)
 
     def calc_change(self, after, before):
         return round((after - before)/before * 100, 2)
