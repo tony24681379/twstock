@@ -1,8 +1,12 @@
+import asyncio
 import datetime
 import time
-import pandas as pd
-import requests
 from collections import namedtuple
+from logging import exception
+
+import httpx
+import pandas as pd
+
 from twstock.proxy import get_proxies
 
 try:
@@ -25,44 +29,48 @@ class BaseFetcher(object):
 
 class WantgooFetcher(BaseFetcher):
     REPORT_URL = WANTGOO_BASE_URL
-    HEADERS = {'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.183 Safari/537.36'}
+    HEADERS = {
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.61 Safari/537.36',
+        'cookie': '_smt_uid=629c5867.5fc65746; BID=894FB88F-DE0F-42C3-8C69-2E6CB780E6EC; BrowserMode=Web; _gcl_au=1.1.654098664.1654413417; hblid=1RZJCacNhvYF9fuz3h7B70HDBzFAaoKr; _okdetect=%7B%22token%22%3A%2216544134175230%22%2C%22proto%22%3A%22about%3A%22%2C%22host%22%3A%22%22%7D; olfsk=olfsk31832645327155573; _ok=8391-691-10-7433; _hjSessionUser_827061=eyJpZCI6IjQ2ZDJlYWI2LWE5NTEtNWFkNS05ZDZhLWM5YmNhNzNkZWI5OSIsImNyZWF0ZWQiOjE2NTQ0MTM0MTY3NzMsImV4aXN0aW5nIjp0cnVlfQ==; client_fingerprint=8762d32f0389049e186a5b228fbb2aeaf2a771d1f23d5feba70da91b3ed81a90; _fbp=fb.1.1654877865921.899127606; _gid=GA1.2.1899882238.1655399587; _gat_gtag_UA_6993262_2=1; __cf_bm=EGMLxJL08zraQuGQ7SB0pF5C84Duv9292VDUhGaKLZ0-1655399587-0-AZhqUucWGit8Okn9acq3EBBZKEkmcr7Qw+D1gNYbafWIhzA35T6uEl3EbGpoUSOQfC7M2nBNAm76SqvWJRlwcBDHyhifEuk5B0Jv5VLfQU3nKYuRgwgj8wmuF6x1yiJXmg==; wcsid=bollsFkWekqs4SxW3h7B70Hba6rAF0AB; _okbk=cd4%3Dtrue%2Cvi5%3D0%2Cvi4%3D1655399588067%2Cvi3%3Dactive%2Cvi2%3Dfalse%2Cvi1%3Dfalse%2Ccd8%3Dchat%2Ccd6%3D0%2Ccd5%3Daway%2Ccd3%3Dfalse%2Ccd2%3D0%2Ccd1%3D0%2C; _hjIncludedInSessionSample=0; _hjSession_827061=eyJpZCI6Ijc4ZjA2ZTQ2LTJlMzItNDZmOS1iYjM1LTU2ZmM4OWQ5OWY5NyIsImNyZWF0ZWQiOjE2NTUzOTk1ODk2NjIsImluU2FtcGxlIjpmYWxzZX0=; _hjAbsoluteSessionInProgress=0; _oklv=1655399593620%2CbollsFkWekqs4SxW3h7B70Hba6rAF0AB; _ga_FCVGHSWXEQ=GS1.1.1655399586.8.1.1655399602.0; _ga=GA1.2.2072470772.1654413417',
+        'x-client-signature': '4e5aebf8960f928932466dc17a59e590df1c9e5efc0645060778c16b1889ec04',
+        'referer': 'https://www.wantgoo.com/stock/6505'
+    }
 
-    def fetch_info(self, sid: str, retry: int=5):
-        for retry_i in range(retry):
-            company_profile_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/company-profile-data',
-                headers = self.HEADERS,
-                proxies=get_proxies())
-                
-            eps_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/financial-statements/eps-data',
-                headers = self.HEADERS,
-                proxies=get_proxies())
-
-            dividend_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/dividend-policy/ex-dividend-data',
-                headers = self.HEADERS,
-                proxies=get_proxies())
-
-            try:
-                company_profile = company_profile_response.json()
-                outstanding_shares = company_profile['outstandingShares'] if type(company_profile) is dict else 1.0
-                eps = eps_response.json()
-                dividend = dividend_response.json()
-            except JSONDecodeError:
-                continue
+    async def fetch_url(self, url: str, params: dict = None, retry: int=5):
+        async with httpx.AsyncClient(http2=True) as client:
+            for retry_i in range(retry):
+                response = await client.get(
+                    url,
+                    params = params,
+                    headers = self.HEADERS
+                )
+                try:
+                    response = response.json()
+    
+                except JSONDecodeError:
+                    await asyncio.sleep(0.1)
+                    continue
+                else:
+                    break
             else:
-                break
-        else:
-            # Fail in all retries
-            print(sid + 'info fail')
+                print(url + ' fail')
+                raise Exception(url + ' fail')
 
+        return response
+        
+    async def fetch_info(self, sid: str):
+        company_profile = self.fetch_url(self.REPORT_URL + 'stock/' + sid + '/company-profile-data')
+        eps = self.fetch_url(self.REPORT_URL + 'stock/' + sid + '/financial-statements/eps-data')
+        dividend = self.fetch_url(self.REPORT_URL + 'stock/' + sid + '/dividend-policy/ex-dividend-data')
+        company_profile, eps, dividend = await asyncio.gather(company_profile, eps, dividend)
+
+        outstanding_shares = company_profile['outstandingShares'] if type(company_profile) is dict else 1.0
         eps = pd.Series({str(e['year'])+'/'+str(e['season'])+'Q': e['beps'] for e in eps})
 
         cash_dividend = 0
         stock_dividend = 0
         if len(dividend) > 0:
-            if str(datetime.datetime.now().year - 2011) in dividend[0]['period']:
+            if dividend[0]['period'] is not None and str(datetime.datetime.now().year - 2011) in dividend[0]['period']:
                 cash_dividend = round(dividend[0]['cashDividend'], 2)
                 stock_dividend = round(dividend[0]['stockDividend'], 2)
 
@@ -78,54 +86,28 @@ class WantgooFetcher(BaseFetcher):
         self.info = pd.Series(self.info)
         return self.info
 
-    def fetch_daily(self, sid: str, num: int, total_stock: int, retry: int=5):
+    async def fetch_daily(self, sid: str, num: int, total_stock: int):
         self.total_stock = total_stock
         params = {'before': int(time.mktime(datetime.datetime.now().timetuple()))*1000, 'top': num}
-        for retry_i in range(retry):
-            candlesticks_response = requests.get(
-                self.REPORT_URL + 'investrue/' + sid + '/historical-daily-candlesticks',
-                params = params,
-                headers = self.HEADERS,
-                proxies=get_proxies())
 
-            institutional_investors_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/institutional-investors/trend-data?topdays=20',
-                headers = self.HEADERS,
-                proxies=get_proxies())
+        candlesticks = self.fetch_url(
+            self.REPORT_URL + 'investrue/' + sid + '/historical-daily-candlesticks',
+            params
+        )
 
-            major_investors_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/major-investors/main-trend-data',
-                headers = self.HEADERS,
-                proxies=get_proxies())
+        institutional_investors = self.fetch_url(
+            self.REPORT_URL + 'stock/' + sid + '/institutional-investors/trend-data?topdays=20'
+        )
+        major_investors = self.fetch_url(self.REPORT_URL + 'stock/' + sid + '/major-investors/main-trend-data')
 
-            lending_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/margin-trading/historical-lending-balance',
-                headers = self.HEADERS,
-                proxies=get_proxies())
+        lending = self.fetch_url(
+            self.REPORT_URL + 'stock/' + sid + '/margin-trading/historical-lending-balance'
+        )
 
-            borrowing_response = requests.get(
-                self.REPORT_URL + 'stock/' + sid + '/margin-trading/historical-borrowing-balance',
-                headers = self.HEADERS,
-                proxies=get_proxies())
-
-            try:
-                candlesticks = candlesticks_response.json()[::-1]
-                institutional_investors = institutional_investors_response.json()[::-1]
-                major_investors = major_investors_response.json()[::-1]
-                lending = lending_response.json()[::-1]
-                borrowing = borrowing_response.json()[::-1]
-            except JSONDecodeError:
-                continue
-            else:
-                break
-        else:
-            # Fail in all retries
-            print(sid + 'daily fail')
-            candlesticks = []
-            institutional_investors = []
-            major_investors = []
-            lending = []
-            borrowing = []
+        borrowing = self.fetch_url(
+            self.REPORT_URL + 'stock/' + sid + '/margin-trading/historical-borrowing-balance',
+        )
+        candlesticks, major_investors, institutional_investors, lending, borrowing = await asyncio.gather(candlesticks, major_investors, institutional_investors, lending, borrowing)
 
         return self.purify(candlesticks, major_investors, institutional_investors, lending, borrowing)
 
@@ -175,23 +157,8 @@ class WantgooFetcher(BaseFetcher):
             'lending_balance', 'borrowing_balance', 'balance_limit'
         ]]
 
-    def get_all_stock_list(self, retry: int=5):
-        for retry_i in range(retry):
-            r = requests.get(self.REPORT_URL + 'investrue/all-alive',
-                headers = self.HEADERS,
-                proxies=get_proxies()
-                )
-            try:
-                data = r.json()
-            except JSONDecodeError:
-                print('error')
-                continue
-            else:
-                break
-        else:
-            # Fail in all retries
-            print('fail')
-            data = []
+    async def get_all_stock_list(self, retry: int=5):
+        data = await self.fetch_url(self.REPORT_URL + 'investrue/all-alive')
 
         filtered = filter(lambda l: l['type'] in ['Index', 'Stock', 'ETF'], data)
         return list(filtered)
