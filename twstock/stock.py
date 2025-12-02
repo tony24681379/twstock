@@ -1,41 +1,42 @@
 # -*- coding: utf-8 -*-
 
-import asyncio
-# import urllib.parse
 import os
-import statistics
 import sys
-from threading import Lock
 
-import time
 import pandas as pd
 import talib
-from talib import MA_Type
-
-from twstock.wantgoo import WantgooFetcher
 
 try:
     from . import analytics
-    from .codes import codes
 except ImportError as e:
-    if e.name == 'lxml':
+    if e.name == "lxml":
         # Fix #69
         raise e
     import analytics
-    from codes import codes
 
 
-INFO_PATH = 'info/'
-DAILY_PATH = 'daily/'
+INFO_PATH = "info/"
+DAILY_PATH = "daily/"
+
 
 class Stock(analytics.Analytics):
-    def __init__(self, sid: str):
+    def __init__(self, sid: str, fetcher=None):
         self.sid = sid
-        self.fetcher = WantgooFetcher()
+        # 使用提供的 fetcher，或者為 None（稍後初始化）
+        self.fetcher = fetcher
         self.info_path = INFO_PATH + self.sid + ".csv"
         self.daily_path = DAILY_PATH + self.sid + ".feather"
 
-    async def load_data(self, load_data: bool=True):
+    async def _ensure_fetcher(self):
+        """確保 fetcher 已初始化"""
+        if self.fetcher is None:
+            from .fetcher_manager import get_global_fetcher
+
+            self.fetcher = await get_global_fetcher()
+
+    async def load_data(self, load_data: bool = True):
+        await self._ensure_fetcher()
+
         if load_data:
             if os.path.isfile(self.info_path):
                 self.info_data = self.read_csv(self.info_path, True)
@@ -53,24 +54,29 @@ class Stock(analytics.Analytics):
             return
         self.daily_data = self.daily_data[::-1]
 
+        # if len(self.daily_data) > 1:
+        #     self.daily_data = self.daily_data[:-1]
+        # else:
+        #     return
+
         self.calc_base()
 
-    def read_csv(self, path, is_squeeze: bool=False):
+    def read_csv(self, path, is_squeeze: bool = False):
         if is_squeeze:
-            return pd.read_csv(path, index_col=0, dtype='object').squeeze("columns")
+            return pd.read_csv(path, index_col=0, dtype="object").squeeze("columns")
         else:
             return pd.read_csv(path, index_col=0, parse_dates=True)
 
-    def to_csv(self, path, data):
+    def to_csv(self, path: str, data: pd.Series):
         data.to_csv(path)
 
-    def read_feather(self, path, is_squeeze: bool=False):
+    def read_feather(self, path: str, is_squeeze: bool = False):
         if is_squeeze:
             return pd.read_feather(path)
         else:
             return pd.read_feather(path)
 
-    def to_feather(self, path, data):
+    def to_feather(self, path: str, data: pd.Series):
         data.to_feather(path)
 
     async def get_all_stock_list(self):
@@ -79,15 +85,23 @@ class Stock(analytics.Analytics):
     def fetch_info(self):
         return self.fetcher.fetch_info(self.sid)
 
-    async def fetch_daily(self, num):
-        return await self.fetcher.fetch_daily(self.sid, num, float(self.info_data.outstanding_shares)/1000)
+    async def fetch_daily(self, num: int):
+        return await self.fetcher.fetch_daily(
+            self.sid, num, float(self.info_data.outstanding_shares) / 1000
+        )
 
     def calc_change(self, after, before):
-        return round((after - before)/before * 100, 2)
+        return round((after - before) / before * 100, 2)
 
     def calc_base(self):
-        self.info_data['capital'] = round(self.close[-1] * float(self.info_data.outstanding_shares) / 100000000, 2)
-        self.info_data['PER'] = round(self.close[-1] / float(self.info_data['PER']), 2) if self.info_data['PER'] is not None and float(self.info_data['PER']) != 0 else None
+        self.info_data["capital"] = round(
+            self.close[-1] * float(self.info_data.outstanding_shares) / 100000000, 2
+        )
+        self.info_data["PER"] = (
+            round(self.close[-1] / float(self.info_data["PER"]), 2)
+            if self.info_data["PER"] is not None and float(self.info_data["PER"]) != 0
+            else None
+        )
 
         bollinger_upper, _, bollinger_lower = talib.BBANDS(self.close, 20)
         k9, d9 = talib.STOCH(self.high, self.low, self.close)
@@ -95,53 +109,67 @@ class Stock(analytics.Analytics):
 
         change = [0]
         for i in range(1, len(self.close)):
-            change.append(self.calc_change(self.close[i],self.close[i-1]))
+            change.append(self.calc_change(self.close[i], self.close[i - 1]))
 
-        self.daily_data['bollinger_upper'] = bollinger_upper
-        self.daily_data['bollinger_lower'] = bollinger_lower
-        self.daily_data['change'] = change
-        self.daily_data['ma5'] = talib.MA(self.close, timeperiod=5)
-        self.daily_data['ma10'] = talib.MA(self.close, timeperiod=10)
-        self.daily_data['ma20'] = talib.MA(self.close, timeperiod=20)
-        self.daily_data['ma60'] = talib.MA(self.close, timeperiod=60)
-        self.daily_data['k9'] = k9
-        self.daily_data['d9'] = d9
-        self.daily_data['macd'] = macd
-        self.daily_data['macdsignal'] = macdsignal
-        self.daily_data['macdhist'] = macdhist
-        self.daily_data['adx'] = talib.ADX(self.high, self.low, self.close, timeperiod=14)
-        self.daily_data['adxr'] = talib.ADXR(self.high, self.low, self.close, timeperiod=14)
-        self.daily_data['plus_di'] = talib.PLUS_DI(self.high, self.low, self.close, timeperiod=14)
-        self.daily_data['minus_di'] = talib.MINUS_DI(self.high, self.low, self.close, timeperiod=14)
+        self.daily_data["bollinger_upper"] = bollinger_upper
+        self.daily_data["bollinger_lower"] = bollinger_lower
+        self.daily_data["change"] = change
+        self.daily_data["ma5"] = talib.MA(self.close, timeperiod=5)
+        self.daily_data["ma10"] = talib.MA(self.close, timeperiod=10)
+        self.daily_data["ma20"] = talib.MA(self.close, timeperiod=20)
+        self.daily_data["ma60"] = talib.MA(self.close, timeperiod=60)
+        self.daily_data["k9"] = k9
+        self.daily_data["d9"] = d9
+        self.daily_data["macd"] = macd
+        self.daily_data["macdsignal"] = macdsignal
+        self.daily_data["macdhist"] = macdhist
+        self.daily_data["adx"] = talib.ADX(
+            self.high, self.low, self.close, timeperiod=14
+        )
+        self.daily_data["adxr"] = talib.ADXR(
+            self.high, self.low, self.close, timeperiod=14
+        )
+        self.daily_data["plus_di"] = talib.PLUS_DI(
+            self.high, self.low, self.close, timeperiod=14
+        )
+        self.daily_data["minus_di"] = talib.MINUS_DI(
+            self.high, self.low, self.close, timeperiod=14
+        )
 
         self.calc_line_diff()
         self.calc_trend()
-        self.seasson_upper_and_lower()
-        self.daily_data = self.daily_data.dropna(how='any')
-    
+        self.season_upper_and_lower()
+        self.daily_data = self.daily_data.dropna(how="any")
+
     def calc_line_diff(self):
         three_line_diff = []
         four_line_diff = []
         for i in range(0, len(self.close)):
-            sub = (max(self.ma5[i] , self.ma10[i], self.ma20[i]) - min(self.ma5[i] , self.ma10[i], self.ma20[i]))
+            sub = max(self.ma5[i], self.ma10[i], self.ma20[i]) - min(
+                self.ma5[i], self.ma10[i], self.ma20[i]
+            )
             avg = statistics.mean([self.ma5[i], self.ma10[i], self.ma20[i]])
             if avg == 0:
                 return None
 
-            three_line_diff.append(sub/avg)
+            three_line_diff.append(sub / avg)
 
-            sub = (max(self.ma5[i] , self.ma10[i], self.ma20[i], self.ma60[i]) - min(self.ma5[i] , self.ma10[i], self.ma20[i], self.ma60[i]))
-            avg = statistics.mean([self.ma5[i], self.ma10[i], self.ma20[i], self.ma60[i]])
+            sub = max(self.ma5[i], self.ma10[i], self.ma20[i], self.ma60[i]) - min(
+                self.ma5[i], self.ma10[i], self.ma20[i], self.ma60[i]
+            )
+            avg = statistics.mean(
+                [self.ma5[i], self.ma10[i], self.ma20[i], self.ma60[i]]
+            )
             if avg == 0:
                 return None
 
-            four_line_diff.append(sub/avg)
+            four_line_diff.append(sub / avg)
 
-        self.daily_data['three_line_diff'] = three_line_diff
-        self.daily_data['four_line_diff'] = four_line_diff
+        self.daily_data["three_line_diff"] = three_line_diff
+        self.daily_data["four_line_diff"] = four_line_diff
 
     def calc_trend(self):
-        high = -sys.maxsize-1
+        high = -sys.maxsize - 1
         low = sys.maxsize
         is_up = True
         day = 0
@@ -160,7 +188,7 @@ class Stock(analytics.Analytics):
             else:
                 wave.append(-1)
                 if is_up is True:
-                    high = -sys.maxsize-1
+                    high = -sys.maxsize - 1
                     is_up = False
                     wave[day] = 2
                 if self.low[i] <= low:
@@ -225,12 +253,12 @@ class Stock(analytics.Analytics):
 
         for i in range(2, len(trend) - 1):
             if trend[-i] == 0:
-                trend[-i] = trend[-i+1]
+                trend[-i] = trend[-i + 1]
 
-        self.daily_data['wave'] = wave
-        self.daily_data['trend'] = trend
-    
-    def seasson_upper_and_lower(self):
+        self.daily_data["wave"] = wave
+        self.daily_data["trend"] = trend
+
+    def season_upper_and_lower(self):
         self.season = self.daily_data[-60:].sort_values(by="close")
 
     @property
@@ -267,7 +295,7 @@ class Stock(analytics.Analytics):
 
     @property
     def capital(self):
-        return self.info_data['capital']
+        return self.info_data["capital"]
 
     @property
     def macd(self):
@@ -328,11 +356,11 @@ class Stock(analytics.Analytics):
     @property
     def adr(self):
         return self.daily_data.adr.values
-    
+
     @property
     def plus_di(self):
         return self.daily_data.plus_di.values
-    
+
     @property
     def minus_di(self):
         return self.daily_data.minus_di.values
