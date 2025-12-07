@@ -160,17 +160,80 @@ class All:
         # self.results = [self.get_stock(l['id']) for l in self.list]
         # self.results = await asyncio.gather(*results)
 
-        self.results = [
-            await self.check_data_exist(l["id"].lower())
-            for l in self.list
-            if l["id"] not in ("000-", "0000")
-        ]
+        # 第一步：篩選出需要處理的股票
+        stocks_to_process = []
+        total_stocks = len([l for l in self.list if l["id"] not in ("000-", "0000")])
+        
+        print(f"開始篩選股票，共 {total_stocks} 支股票...")
+        checked_count = 0
+        for l in self.list:
+            if l["id"] not in ("000-", "0000"):
+                checked_count += 1
+                needs_processing = await self.check_data_exist(l["id"].lower())
+                if needs_processing:
+                    stocks_to_process.append(l["id"].lower())
+                # 每 100 支顯示一次進度
+                if checked_count % 100 == 0:
+                    print(f"  已檢查: {checked_count}/{total_stocks} ({checked_count*100/total_stocks:.1f}%)")
 
-        self.results = [
-            await self.get_stock(l["id"].lower())
-            for l in self.list
-            if l["id"] not in ("000-", "0000")
-        ]
+        print(f"篩選完成: {len(stocks_to_process)}/{total_stocks} 支股票需要處理")
+
+        # 第二步：只處理篩選出的股票
+        print(f"\n開始處理 {len(stocks_to_process)} 支股票...")
+        
+        start_time = time.time()
+        
+        # 使用並行處理，限制同時處理的數量
+        # 從環境變數讀取，PostgreSQL 可以處理更多並發
+        BATCH_SIZE = int(os.getenv('BATCH_SIZE', '10'))  # 預設 10 支股票
+        
+        self.results = []
+        total_processed = 0
+        
+        for batch_start in range(0, len(stocks_to_process), BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, len(stocks_to_process))
+            batch_stocks = stocks_to_process[batch_start:batch_end]
+            
+            # 並行處理這批股票
+            batch_tasks = [self.get_stock(sid) for sid in batch_stocks]
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            # 處理結果
+            for sid, result in zip(batch_stocks, batch_results):
+                if isinstance(result, Exception):
+                    print(f"  錯誤: {sid} - {result}")
+                    # 如果出錯，建立一個空的結果
+                    result = (sid, pd.Series(index=INDEX + SKILL_INDEX), pd.Series(), pd.DataFrame({}))
+                
+                self.results.append(result)
+                total_processed += 1
+            
+            # 顯示進度
+            progress_pct = total_processed * 100 / len(stocks_to_process)
+            elapsed_time = time.time() - start_time
+            avg_time_per_stock = elapsed_time / total_processed if total_processed > 0 else 0
+            remaining_stocks = len(stocks_to_process) - total_processed
+            eta_seconds = avg_time_per_stock * remaining_stocks
+            eta_minutes = int(eta_seconds / 60)
+            eta_seconds = int(eta_seconds % 60)
+            
+            print(f"  [{total_processed}/{len(stocks_to_process)}] 批次完成 - ({progress_pct:.1f}%) - 預估剩餘 {eta_minutes}分{eta_seconds}秒")
+            
+            # 每 100 支顯示詳細進度
+            if total_processed % 100 == 0 or total_processed == len(stocks_to_process):
+                elapsed_minutes = int(elapsed_time / 60)
+                elapsed_seconds = int(elapsed_time % 60)
+                print(f"\n=== 進度更新: 已完成 {total_processed}/{len(stocks_to_process)} 支股票 ({progress_pct:.1f}%) ===")
+                print(f"    已用時間: {elapsed_minutes}分{elapsed_seconds}秒")
+                print(f"    預估剩餘: {eta_minutes}分{eta_seconds}秒")
+                print(f"    平均速度: {total_processed/elapsed_time:.2f} 支/秒\n")
+        
+        total_time = time.time() - start_time
+        total_minutes = int(total_time / 60)
+        total_seconds = int(total_time % 60)
+        print(f"\n✅ 處理完成: 共處理了 {len(self.results)} 支股票")
+        print(f"   總耗時: {total_minutes}分{total_seconds}秒")
+        print(f"   平均速度: {len(self.results)/total_time:.2f} 支/秒")
 
         # pool = 10
 
@@ -281,27 +344,32 @@ class All:
         result = sum(data[days * -1 :])
         return result if result != 0 else None
 
-    async def check_data_exist(self, sid: str):
-        # 使用共享的 fetcher
-        stock = Stock(sid, fetcher=self.fetcher)
+    async def check_data_exist(self, sid: str) -> bool:
+        """
+        篩選股票：檢查是否需要處理這支股票
+        返回 True 表示需要處理，False 表示跳過
+        """
+        # 移除個別檢查的輸出，改用總體進度顯示
 
-        print(stock.sid + " check")
-
-        if sid not in self.loaded:
-            await stock.load_data()
-            self.loaded[sid] = sid
-            loaded = pd.Series(self.loaded)
-            loaded.to_csv(self.loaded_path)
+        # 檢查資料庫中的追蹤狀態
+        if hasattr(self.fetcher, 'db_manager') and self.fetcher.db_manager:
+            needs_update = await self.fetcher.db_manager.check_needs_update(sid, days_threshold=1)
+            return needs_update  # 需要更新就處理，不需要更新就跳過
+        else:
+            # 回退到舊的 CSV 追蹤方式
+            return sid not in self.loaded  # 如果不在 loaded 清單中就處理
 
     async def get_stock(self, sid: str):
         # 使用共享的 fetcher
         stock = Stock(sid, fetcher=self.fetcher)
 
+        # 載入資料（會自動判斷是否需要從 API 更新）
         await stock.load_data()
+        
+        # 移除個別處理的輸出，改用總體進度顯示
 
-        print(stock.sid)
-
-        if len(stock.close) < 60:
+        # 檢查是否有足夠的資料進行分析
+        if not hasattr(stock, 'close') or len(stock.close) < 60:
             return (
                 stock.sid,
                 pd.Series(index=INDEX + SKILL_INDEX),

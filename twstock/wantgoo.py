@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import time
 from collections import namedtuple
+from typing import Optional
 
 import httpx
 import pandas as pd
@@ -15,6 +16,11 @@ try:
     from .wantgoo_initializer import WantgooInitializer
 except ImportError:
     WantgooInitializer = None
+
+try:
+    from .database import DatabaseManager
+except ImportError:
+    DatabaseManager = None
 
 WANTGOO_BASE_URL = "https://www.wantgoo.com/"
 DATATUPLE = namedtuple("Data", ["date", "volume", "open", "high", "low", "close"])
@@ -46,11 +52,12 @@ class WantgooFetcher(BaseFetcher):
         "referer": "https://www.wantgoo.com/stock/2330",
     }
     
-    def __init__(self):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None):
         super().__init__()
         self.headers = self.DEFAULT_HEADERS.copy()
         self.initialized = False
         self.refresh_lock = asyncio.Lock()
+        self.db_manager = db_manager  # 資料庫管理器
     
     async def _initialize_headers(self):
         """初始化 headers（只在第一次使用時）"""
@@ -209,7 +216,7 @@ class WantgooFetcher(BaseFetcher):
 
         return response
 
-    async def fetch_info(self, sid: str):
+    async def fetch_info(self, sid: str, save_to_db: bool = True):
         company_profile = self.fetch_url(
             self.REPORT_URL + "stock/" + sid + "/company-profile-data"
         )
@@ -246,15 +253,24 @@ class WantgooFetcher(BaseFetcher):
             "id": sid,
             "capital": 1.0,
             "outstanding_shares": outstanding_shares,
-            "PER": eps[0] if len(eps) >= 1 else None,
+            "PER": eps.iloc[0] if len(eps) >= 1 else None,
             "cash_dividend": cash_dividend,
             "stock_dividend": stock_dividend,
         }
         self.info.update(eps)
         self.info = pd.Series(self.info)
+        
+        # 儲存到資料庫
+        if save_to_db and self.db_manager:
+            try:
+                await self.db_manager.save_stock_info(sid, self.info)
+                print(f"Stock info for {sid} saved to database")
+            except Exception as e:
+                print(f"Error saving stock info to database: {e}")
+        
         return self.info
 
-    async def fetch_daily(self, sid: str, num: int, total_stock: int):
+    async def fetch_daily(self, sid: str, num: int, total_stock: int, save_to_db: bool = True):
         self.total_stock = total_stock
         params = {
             "before": int(time.mktime(datetime.datetime.now().timetuple())) * 1000,
@@ -307,18 +323,33 @@ class WantgooFetcher(BaseFetcher):
             else:
                 raise e
 
-        return self.purify(
+        daily_data = self.purify(
             candlesticks, major_investors, institutional_investors, lending, borrowing
         )
+        
+        # 儲存到資料庫
+        if save_to_db and self.db_manager and not daily_data.empty:
+            try:
+                await self.db_manager.save_daily_data(sid, daily_data)
+                print(f"Daily data for {sid} saved to database ({len(daily_data)} records)")
+            except Exception as e:
+                print(f"Error saving daily data to database: {e}")
+        
+        return daily_data
 
     def purify(
         self, candlesticks, major_investors, institutional_investors, lending, borrowing
     ):
+        # Import db_utils for consistent date conversion
+        from .db_utils import to_python_datetime
+        
         candlesticks_data = pd.DataFrame(
             candlesticks, columns=["volume", "open", "close", "high", "low"]
         )
+        # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         candlesticks_data["date"] = [
-            datetime.datetime.fromtimestamp(d["tradeDate"] / 1000) for d in candlesticks
+            to_python_datetime(datetime.datetime.fromtimestamp(d["tradeDate"] / 1000)) 
+            for d in candlesticks
         ]
 
         institutional_investors_data = pd.DataFrame(
@@ -342,8 +373,9 @@ class WantgooFetcher(BaseFetcher):
             }
         )
 
+        # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         institutional_investors_data["date"] = [
-            datetime.datetime.fromtimestamp(d["date"] / 1000)
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000))
             for d in institutional_investors
         ]
 
@@ -356,8 +388,10 @@ class WantgooFetcher(BaseFetcher):
                 "stockAgentDiff": "agent_diff",
             }
         )
+        # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         major_investors_data["date"] = [
-            datetime.datetime.fromtimestamp(d["date"] / 1000) for d in major_investors
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000)) 
+            for d in major_investors
         ]
 
         lending_data = pd.DataFrame(
@@ -365,15 +399,19 @@ class WantgooFetcher(BaseFetcher):
         ).rename(
             columns={"lendingBalance": "lending_balance", "limit": "balance_limit"}
         )
+        # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         lending_data["date"] = [
-            datetime.datetime.fromtimestamp(d["date"] / 1000) for d in lending
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000)) 
+            for d in lending
         ]
 
         borrowing_data = pd.DataFrame(
             borrowing, columns=["date", "borrowingBalance"]
         ).rename(columns={"borrowingBalance": "borrowing_balance"})
+        # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         borrowing_data["date"] = [
-            datetime.datetime.fromtimestamp(d["date"] / 1000) for d in borrowing
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000)) 
+            for d in borrowing
         ]
 
         data = pd.merge(
@@ -414,7 +452,13 @@ class WantgooFetcher(BaseFetcher):
             ),
         )
 
-        data = data.fillna(0.0).infer_objects(copy=False)
+        # 設定 pandas 選項避免 FutureWarning
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            data = data.fillna(0.0)
+        
+        data = data.infer_objects(copy=False)
 
         return data[
             [
