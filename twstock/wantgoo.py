@@ -51,115 +51,168 @@ class WantgooFetcher(BaseFetcher):
         "pragma": "no-cache",
         "referer": "https://www.wantgoo.com/stock/2330",
     }
-    
+
+    # 類級別的鎖，確保只有一個 Playwright 實例在初始化 headers
+    _refresh_lock = asyncio.Lock()
+    _last_refresh_time = None  # 類級別的上次刷新時間
+
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
         super().__init__()
         self.headers = self.DEFAULT_HEADERS.copy()
         self.initialized = False
-        self.refresh_lock = asyncio.Lock()
         self.db_manager = db_manager  # 資料庫管理器
-    
+        self.api_latest_date = None  # API 最新資料日期
+
     async def _initialize_headers(self):
-        """初始化 headers（只在第一次使用時）"""
-        async with self.refresh_lock:
+        """初始化 headers（只在第一次使用時）並確認 API 最新資料日期"""
+        async with WantgooFetcher._refresh_lock:
             if self.initialized:
                 return
-            
-            print("Initializing headers...")
-            
+
+            print("Initializing headers and checking API latest date...")
+
             # 優先使用 WantgooInitializer 獲取完整 headers
             if WantgooInitializer:
                 try:
                     headers = await WantgooInitializer.initialize(use_playwright=True)
-                    if headers and 'x-client-signature' in headers:
+                    if headers and "x-client-signature" in headers:
                         self.headers.update(headers)
                         self.initialized = True
                         print("Headers initialized with x-client-signature")
-                        return
+                        # 繼續確認 API 最新日期
                 except Exception as e:
                     print(f"WantgooInitializer failed: {e}")
-            
-            # 備用：簡單方法獲取 cookies
-            try:
-                async with httpx.AsyncClient(
-                    http2=True, follow_redirects=True, timeout=10.0
-                ) as client:
-                    response = await client.get(
-                        "https://www.wantgoo.com/stock/2330", headers=self.headers
-                    )
-                    if response.cookies:
-                        cookie_str = "; ".join([f"{k}={v}" for k, v in response.cookies.items()])
-                        if cookie_str:
-                            self.headers['cookie'] = cookie_str
-                            print("Headers initialized with basic cookies")
-            except Exception as e:
-                print(f"Failed to get basic cookies: {e}")
-            
+
+            # 如果還沒初始化，使用備用方法獲取 cookies
+            if not self.initialized:
+                try:
+                    async with httpx.AsyncClient(
+                        http2=True, follow_redirects=True, timeout=10.0
+                    ) as client:
+                        response = await client.get(
+                            "https://www.wantgoo.com/stock/2330", headers=self.headers
+                        )
+                        if response.cookies:
+                            cookie_str = "; ".join(
+                                [f"{k}={v}" for k, v in response.cookies.items()]
+                            )
+                            if cookie_str:
+                                self.headers["cookie"] = cookie_str
+                                print("Headers initialized with basic cookies")
+                except Exception as e:
+                    print(f"Failed to get basic cookies: {e}")
+
             self.initialized = True
-    
+
+            # 抓取測試股票（2330）來確認 API 最新資料日期
+            try:
+                print("Fetching test data from API to check latest date...")
+                params = {
+                    "before": int(time.time()) * 1000,
+                    "top": 5,  # 只抓最近 5 筆就夠了
+                }
+                test_data = await self.fetch_url(
+                    self.REPORT_URL + "investrue/2330/historical-daily-candlesticks",
+                    params,
+                )
+
+                if test_data and len(test_data) > 0:
+                    # 取得最新的資料日期
+                    latest_timestamp = test_data[0]["tradeDate"] / 1000
+                    self.api_latest_date = datetime.datetime.fromtimestamp(
+                        latest_timestamp
+                    ).date()
+                    print(f"✓ API 最新資料日期: {self.api_latest_date}")
+
+                    # 如果有資料庫管理器，將最新日期傳遞給它
+                    if self.db_manager:
+                        self.db_manager.api_latest_date = self.api_latest_date
+                else:
+                    print("⚠️  無法從 API 取得測試資料，將使用預設更新邏輯")
+            except Exception as e:
+                print(f"⚠️  確認 API 最新日期時發生錯誤: {e}")
+                print("   將使用預設更新邏輯")
+
     async def _refresh_headers(self):
         """當 headers 失效時更新（只在 API 返回 401/403 時）"""
-        async with self.refresh_lock:
+        async with WantgooFetcher._refresh_lock:
+            # 檢查是否已經被其他請求更新過了
+            if WantgooFetcher._last_refresh_time is not None:
+                import time
+
+                if time.time() - WantgooFetcher._last_refresh_time < 5:  # 5 秒內已刷新
+                    print("Headers recently refreshed by another request, skipping...")
+                    return True
+
             print("Headers expired, refreshing...")
-            
+
             # 重要：更新時不使用 Playwright，因為太慢
             # 只使用簡單的 httpx 方法重新獲取 cookies
             # x-client-signature 通常不會變，只有 cookies 會過期
-            
+
             try:
                 async with httpx.AsyncClient(
                     http2=True, follow_redirects=True, timeout=10.0
                 ) as client:
                     # 保留現有的 x-client-signature，只更新 cookies
                     temp_headers = self.DEFAULT_HEADERS.copy()
-                    if 'x-client-signature' in self.headers:
-                        temp_headers['x-client-signature'] = self.headers[
-                            'x-client-signature'
+                    if "x-client-signature" in self.headers:
+                        temp_headers["x-client-signature"] = self.headers[
+                            "x-client-signature"
                         ]
-                    
+
                     response = await client.get(
                         "https://www.wantgoo.com/stock/2330", headers=temp_headers
                     )
-                    
+
                     if response.cookies:
-                        cookie_str = "; ".join([f"{k}={v}" for k, v in response.cookies.items()])
+                        cookie_str = "; ".join(
+                            [f"{k}={v}" for k, v in response.cookies.items()]
+                        )
                         if cookie_str:
                             # 只更新 cookie，保留其他 headers
-                            self.headers['cookie'] = cookie_str
+                            self.headers["cookie"] = cookie_str
+
+                            WantgooFetcher._last_refresh_time = time.time()
                             print("Cookies refreshed successfully")
                             return True
                     else:
                         print("No cookies received from server")
             except Exception as e:
                 print(f"Failed to refresh cookies: {e}")
-            
+
             # 如果簡單方法失敗，最後才考慮使用 Playwright（但通常不應該發生）
             if WantgooInitializer:
                 try:
-                    print("WARNING: Simple refresh failed, using Playwright as last resort...")
+                    print(
+                        "WARNING: Simple refresh failed, using Playwright as last resort..."
+                    )
                     headers = await WantgooInitializer.initialize(use_playwright=True)
                     if headers:
                         self.headers.update(headers)
+                        import time
+
+                        WantgooFetcher._last_refresh_time = time.time()
                         print("Headers fully refreshed with Playwright")
                         return True
                 except Exception as e:
                     print(f"Playwright refresh also failed: {e}")
-            
+
             return False
-    
+
     async def fetch_url(self, url: str, params: dict = None, retry: int = 5):
         # 確保初始化（只在第一次）
         if not self.initialized:
             await self._initialize_headers()
-        
-        async with httpx.AsyncClient(
-            http2=True, timeout=httpx.Timeout(30.0)
-        ) as client:
+
+        async with httpx.AsyncClient(http2=True, timeout=httpx.Timeout(30.0)) as client:
             headers_refreshed = False  # 記錄是否已經刷新過 headers
-            
+
             for retry_i in range(retry):
                 try:
-                    response = await client.get(url, params=params, headers=self.headers)
+                    response = await client.get(
+                        url, params=params, headers=self.headers
+                    )
                 except httpx.TimeoutException:
                     print(f"Timeout on attempt {retry_i + 1} for {url}")
                     await asyncio.sleep(1)
@@ -168,7 +221,7 @@ class WantgooFetcher(BaseFetcher):
                     print(f"Error on attempt {retry_i + 1} for {url}: {e}")
                     await asyncio.sleep(1)
                     continue
-                
+
                 try:
                     # 在 400/401/403 時更新 headers（且只更新一次）
                     if response.status_code in [400, 401, 403]:
@@ -182,8 +235,10 @@ class WantgooFetcher(BaseFetcher):
                             else:
                                 print(f"Failed to refresh headers for {url}")
                         else:
-                            print(f"Still getting {response.status_code} after refresh for {url}")
-                        
+                            print(
+                                f"Still getting {response.status_code} after refresh for {url}"
+                            )
+
                         # 如果更新失敗或已經更新過，繼續重試但不再更新
                         await asyncio.sleep(2)  # 稍微等待長一點
                         continue
@@ -191,9 +246,9 @@ class WantgooFetcher(BaseFetcher):
                         print(f"Got status {response.status_code} for {url}")
                         await asyncio.sleep(1)
                         continue
-                    
+
                     response = response.json()
-                    
+
                 except JSONDecodeError:
                     # JSON 解析失敗，可能是 headers 失效
                     if not headers_refreshed and retry_i == 0:
@@ -202,7 +257,7 @@ class WantgooFetcher(BaseFetcher):
                         headers_refreshed = True
                         if success:
                             continue
-                    
+
                     print(f"JSON decode error for {url}")
                     if retry_i < retry - 1:
                         await asyncio.sleep(0.5)
@@ -217,6 +272,7 @@ class WantgooFetcher(BaseFetcher):
         return response
 
     async def fetch_info(self, sid: str, save_to_db: bool = True):
+        sid = sid.lower()  # 統一使用小寫 ID
         company_profile = self.fetch_url(
             self.REPORT_URL + "stock/" + sid + "/company-profile-data"
         )
@@ -259,7 +315,7 @@ class WantgooFetcher(BaseFetcher):
         }
         self.info.update(eps)
         self.info = pd.Series(self.info)
-        
+
         # 儲存到資料庫
         if save_to_db and self.db_manager:
             try:
@@ -267,10 +323,13 @@ class WantgooFetcher(BaseFetcher):
                 print(f"Stock info for {sid} saved to database")
             except Exception as e:
                 print(f"Error saving stock info to database: {e}")
-        
+
         return self.info
 
-    async def fetch_daily(self, sid: str, num: int, total_stock: int, save_to_db: bool = True):
+    async def fetch_daily(
+        self, sid: str, num: int, total_stock: int, save_to_db: bool = True
+    ):
+        sid = sid.lower()  # 統一使用小寫 ID
         self.total_stock = total_stock
         params = {
             "before": int(time.mktime(datetime.datetime.now().timetuple())) * 1000,
@@ -313,7 +372,11 @@ class WantgooFetcher(BaseFetcher):
                 lending,
                 borrowing,
             ) = await asyncio.gather(
-                candlesticks, major_investors, institutional_investors, lending, borrowing
+                candlesticks,
+                major_investors,
+                institutional_investors,
+                lending,
+                borrowing,
             )
         except Exception as e:
             # 如果是股票不存在或已下市，返回空資料
@@ -326,15 +389,17 @@ class WantgooFetcher(BaseFetcher):
         daily_data = self.purify(
             candlesticks, major_investors, institutional_investors, lending, borrowing
         )
-        
+
         # 儲存到資料庫
         if save_to_db and self.db_manager and not daily_data.empty:
             try:
                 await self.db_manager.save_daily_data(sid, daily_data)
-                print(f"Daily data for {sid} saved to database ({len(daily_data)} records)")
+                print(
+                    f"Daily data for {sid} saved to database ({len(daily_data)} records)"
+                )
             except Exception as e:
                 print(f"Error saving daily data to database: {e}")
-        
+
         return daily_data
 
     def purify(
@@ -342,13 +407,13 @@ class WantgooFetcher(BaseFetcher):
     ):
         # Import db_utils for consistent date conversion
         from .db_utils import to_python_datetime
-        
+
         candlesticks_data = pd.DataFrame(
             candlesticks, columns=["volume", "open", "close", "high", "low"]
         )
         # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         candlesticks_data["date"] = [
-            to_python_datetime(datetime.datetime.fromtimestamp(d["tradeDate"] / 1000)) 
+            to_python_datetime(datetime.datetime.fromtimestamp(d["tradeDate"] / 1000))
             for d in candlesticks
         ]
 
@@ -390,7 +455,7 @@ class WantgooFetcher(BaseFetcher):
         )
         # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         major_investors_data["date"] = [
-            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000)) 
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000))
             for d in major_investors
         ]
 
@@ -401,7 +466,7 @@ class WantgooFetcher(BaseFetcher):
         )
         # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         lending_data["date"] = [
-            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000)) 
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000))
             for d in lending
         ]
 
@@ -410,7 +475,7 @@ class WantgooFetcher(BaseFetcher):
         ).rename(columns={"borrowingBalance": "borrowing_balance"})
         # 確保所有日期都是 Python datetime，避免 Pandas Timestamp
         borrowing_data["date"] = [
-            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000)) 
+            to_python_datetime(datetime.datetime.fromtimestamp(d["date"] / 1000))
             for d in borrowing
         ]
 
@@ -454,10 +519,11 @@ class WantgooFetcher(BaseFetcher):
 
         # 設定 pandas 選項避免 FutureWarning
         import warnings
+
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning)
             data = data.fillna(0.0)
-        
+
         data = data.infer_objects(copy=False)
 
         return data[

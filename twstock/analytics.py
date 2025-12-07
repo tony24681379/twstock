@@ -57,7 +57,7 @@ class Analytics(object):
 
     def moving_average(self, data, days):
         result = []
-        data = data[:]
+        data = list(data[:])  # Convert to list to ensure pop() method is available
         for _ in range(len(data) - days + 1):
             result.append(round(sum(data[-days:]) / days, 2))
             data.pop()
