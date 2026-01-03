@@ -402,6 +402,67 @@ class WantgooFetcher(BaseFetcher):
 
         return daily_data
 
+    async def fetch_concentration_data(
+        self, sid: str, weeks: int = 10, save_to_db: bool = True
+    ):
+        """
+        抓取股票籌碼集中度數據
+
+        Args:
+            sid: 股票代碼
+            weeks: 取得幾週的數據（預設 10 週）
+            save_to_db: 是否儲存到資料庫
+
+        Returns:
+            pd.DataFrame: 包含近 N 週的籌碼集中度數據
+
+        注意：fetch_url() 會自動套用 self.headers（包含 x-client-signature 和 cookies）
+        不需要額外傳遞 headers 參數
+        """
+        sid = sid.lower()  # 統一使用小寫 ID
+
+        try:
+            # fetch_url() 內部會自動處理 headers 和重試邏輯
+            data = await self.fetch_url(
+                self.REPORT_URL + "stock/" + sid + "/major-investors/concentration-data"
+            )
+        except Exception as e:
+            if "fail after" in str(e):
+                print(f"Stock {sid} concentration data unavailable")
+                return pd.DataFrame()
+            else:
+                raise e
+
+        # 轉換數據
+        records = [
+            {
+                "date": datetime.datetime.fromtimestamp(item["date"] / 1000),
+                "moreThan400": item.get("moreThan400", 0),
+                "moreThan1000": item.get("moreThan1000", 0),
+                "lessThan20": item.get("lessThan20", 0),
+                "close": item.get("close", 0),
+                "directorRatio": item.get("directorRatio", 0),
+                "rateOfForeignHolding": item.get("rateOfForeignHolding", 0),
+                "rateOfINGHolding": item.get("rateOfINGHolding", 0),
+                "rateOfDealerHolding": item.get("rateOfDealerHolding", 0),
+            }
+            for item in data
+        ]
+
+        df = pd.DataFrame(records).sort_values("date", ascending=False)
+
+        # 儲存到資料庫（儲存所有資料）
+        if save_to_db and self.db_manager and not df.empty:
+            try:
+                await self.db_manager.save_concentration_data(sid, df)
+            except Exception as e:
+                print(f"Error saving concentration data to database: {e}")
+
+        # API 返回的資料已經是週資料，直接取前 N 週
+        weekly_data = df.head(weeks)
+
+        return weekly_data
+
     def purify(
         self, candlesticks, major_investors, institutional_investors, lending, borrowing
     ):

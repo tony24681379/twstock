@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
-import argparse
-from twstock import cli
+from twstock.all import All
 
+if __name__ == "__main__":
+    import asyncio
 
-if __name__ == '__main__':
-    cli.run()
+    all_processor = All()
+    asyncio.run(all_processor.get_all_stock_list())
+    asyncio.run(all_processor.get_all_stock_parallel())

@@ -167,6 +167,45 @@ class StockList(BaseModel):
         from_attributes = True
 
 
+class ConcentrationData(BaseModel):
+    """籌碼集中度數據"""
+
+    id: Optional[int] = Field(None, description="ID")
+    stock_id: str = Field(..., description="股票代碼")
+    date: date = Field(..., description="日期")
+    more_than_400: Optional[float] = Field(None, description=">400張大股東占比")
+    more_than_1000: Optional[float] = Field(None, description=">1000張大股東占比")
+    less_than_20: Optional[float] = Field(None, description="<20張散戶占比")
+    close: Optional[float] = Field(None, description="收盤價")
+    director_ratio: Optional[float] = Field(None, description="董監持股比率")
+    rate_of_foreign_holding: Optional[float] = Field(None, description="外資持股比率")
+    rate_of_ing_holding: Optional[float] = Field(None, description="投信持股比率")
+    rate_of_dealer_holding: Optional[float] = Field(None, description="自營商持股比率")
+
+    @field_validator(
+        "more_than_400",
+        "more_than_1000",
+        "less_than_20",
+        "close",
+        "director_ratio",
+        "rate_of_foreign_holding",
+        "rate_of_ing_holding",
+        "rate_of_dealer_holding",
+        mode="before",
+    )
+    @classmethod
+    def validate_floats(cls, v):
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    class Config:
+        from_attributes = True
+
+
 class BatchStockData(BaseModel):
     """批次股票資料"""
 
@@ -176,6 +215,7 @@ class BatchStockData(BaseModel):
     institutional_data: List[InstitutionalInvestors] = Field(default_factory=list)
     major_investor_data: List[MajorInvestors] = Field(default_factory=list)
     margin_trading_data: List[MarginTrading] = Field(default_factory=list)
+    concentration_data: List[ConcentrationData] = Field(default_factory=list)
 
     def has_data(self) -> bool:
         """檢查是否有任何資料"""
@@ -187,6 +227,7 @@ class BatchStockData(BaseModel):
                 len(self.institutional_data) > 0,
                 len(self.major_investor_data) > 0,
                 len(self.margin_trading_data) > 0,
+                len(self.concentration_data) > 0,
             ]
         )
 
@@ -199,4 +240,5 @@ class BatchStockData(BaseModel):
             + len(self.institutional_data)
             + len(self.major_investor_data)
             + len(self.margin_trading_data)
+            + len(self.concentration_data)
         )

@@ -119,6 +119,30 @@ class MarginTrading(Base):
     __table_args__ = (Index("idx_margin_stock_date", "stock_id", "date", unique=True),)
 
 
+class ConcentrationData(Base):
+    """籌碼集中度數據表"""
+
+    __tablename__ = "concentration_data"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    stock_id = Column(String, nullable=False, index=True, comment="股票代號")
+    date = Column(DateTime, nullable=False, comment="交易日期")
+    more_than_400 = Column(Float, comment=">400張大股東占比")
+    more_than_1000 = Column(Float, comment=">1000張大股東占比")
+    less_than_20 = Column(Float, comment="<20張散戶占比")
+    close = Column(Float, comment="收盤價")
+    director_ratio = Column(Float, comment="董監持股比率")
+    rate_of_foreign_holding = Column(Float, comment="外資持股比率")
+    rate_of_ing_holding = Column(Float, comment="投信持股比率")
+    rate_of_dealer_holding = Column(Float, comment="自營商持股比率")
+    created_at = Column(DateTime, default=datetime.now, comment="建立時間")
+
+    __table_args__ = (
+        Index("idx_concentration_stock_date", "stock_id", "date", unique=True),
+        Index("idx_concentration_date", "date"),
+    )
+
+
 class StockEPS(Base):
     """股票EPS資料表"""
 
@@ -537,6 +561,89 @@ class DatabaseManager:
                         margin_records,
                     )
 
+    async def save_concentration_data(
+        self, stock_id: str, concentration_df: pd.DataFrame
+    ):
+        """儲存籌碼集中度資料（批次 SQL INSERT）"""
+        stock_id = stock_id.lower()  # 統一使用小寫 ID
+        if concentration_df.empty:
+            return
+
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                # 準備批次資料
+                concentration_records = []
+
+                for _, row in concentration_df.iterrows():
+                    # 處理日期
+                    if "date" in row and pd.notna(row["date"]):
+                        if isinstance(row["date"], str):
+                            date_value = datetime.strptime(row["date"], "%Y-%m-%d")
+                        elif hasattr(row["date"], "to_pydatetime"):
+                            date_value = row["date"].to_pydatetime()
+                        else:
+                            date_value = row["date"]
+                    else:
+                        continue
+
+                    # 生成唯一 ID（使用 MD5 hash）
+                    unique_str = f"{stock_id}_conc_{date_value.strftime('%Y%m%d')}"
+                    hash_obj = hashlib.md5(unique_str.encode())
+                    simple_id = int(hash_obj.hexdigest()[:15], 16)
+
+                    concentration_records.append(
+                        {
+                            "id": simple_id,
+                            "stock_id": stock_id,
+                            "date": date_value,
+                            "more_than_400": safe_float(row.get("moreThan400")),
+                            "more_than_1000": safe_float(row.get("moreThan1000")),
+                            "less_than_20": safe_float(row.get("lessThan20")),
+                            "close": safe_float(row.get("close")),
+                            "director_ratio": safe_float(row.get("directorRatio")),
+                            "rate_of_foreign_holding": safe_float(
+                                row.get("rateOfForeignHolding")
+                            ),
+                            "rate_of_ing_holding": safe_float(row.get("rateOfINGHolding")),
+                            "rate_of_dealer_holding": safe_float(
+                                row.get("rateOfDealerHolding")
+                            ),
+                        }
+                    )
+
+                # 批次 INSERT（使用 ON CONFLICT DO UPDATE）
+                if concentration_records:
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO concentration_data (
+                                id, stock_id, date, more_than_400, more_than_1000,
+                                less_than_20, "close", director_ratio,
+                                rate_of_foreign_holding, rate_of_ing_holding,
+                                rate_of_dealer_holding
+                            )
+                            VALUES (
+                                :id, :stock_id, :date, :more_than_400, :more_than_1000,
+                                :less_than_20, :close, :director_ratio,
+                                :rate_of_foreign_holding, :rate_of_ing_holding,
+                                :rate_of_dealer_holding
+                            )
+                            ON CONFLICT (stock_id, date)
+                            DO UPDATE SET
+                                more_than_400 = EXCLUDED.more_than_400,
+                                more_than_1000 = EXCLUDED.more_than_1000,
+                                less_than_20 = EXCLUDED.less_than_20,
+                                "close" = EXCLUDED."close",
+                                director_ratio = EXCLUDED.director_ratio,
+                                rate_of_foreign_holding = EXCLUDED.rate_of_foreign_holding,
+                                rate_of_ing_holding = EXCLUDED.rate_of_ing_holding,
+                                rate_of_dealer_holding = EXCLUDED.rate_of_dealer_holding
+                        """
+                        ),
+                        concentration_records,
+                    )
+                    await session.commit()
+
     async def save_stock_list(self, stocks: List[Dict[str, Any]]):
         """儲存股票清單（使用批次 SQL INSERT）"""
         if not stocks:
@@ -788,6 +895,77 @@ class DatabaseManager:
             result_dict = {}
             for stock_id, data_list in stock_data_dict.items():
                 result_dict[stock_id] = pd.DataFrame(data_list)
+
+            return result_dict
+
+    async def bulk_load_concentration_data(
+        self, stock_ids: List[str], weeks: int = 10
+    ) -> Dict[str, pd.DataFrame]:
+        """批次載入多支股票的籌碼集中度資料（使用單一 SQL 查詢）
+
+        Args:
+            stock_ids: 股票代碼列表
+            weeks: 載入最近幾週的資料（每週約 5 個交易日）
+
+        Returns:
+            Dict[stock_id, DataFrame]: 每支股票的 DataFrame
+        """
+        stock_ids = [sid.lower() for sid in stock_ids]
+        days = weeks * 7  # 大約 10 週 = 70 天
+
+        async with self.get_session() as session:
+            # 使用單一 SQL 查詢取得所有股票的集中度資料
+            result = await session.execute(
+                text(
+                    f"""
+                    SELECT
+                        stock_id,
+                        date,
+                        more_than_400,
+                        more_than_1000,
+                        less_than_20,
+                        "close",
+                        director_ratio,
+                        rate_of_foreign_holding,
+                        rate_of_ing_holding,
+                        rate_of_dealer_holding
+                    FROM concentration_data
+                    WHERE stock_id = ANY(:stock_ids)
+                    AND date >= CURRENT_DATE - INTERVAL '{days} days'
+                    ORDER BY stock_id, date DESC
+                """
+                ),
+                {"stock_ids": stock_ids},
+            )
+
+            # 將結果按股票代碼分組
+            stock_data_dict = {}
+            for row in result:
+                stock_id = row.stock_id
+                if stock_id not in stock_data_dict:
+                    stock_data_dict[stock_id] = []
+
+                stock_data_dict[stock_id].append(
+                    {
+                        "date": row.date,
+                        "moreThan400": row.more_than_400 or 0,
+                        "moreThan1000": row.more_than_1000 or 0,
+                        "lessThan20": row.less_than_20 or 0,
+                        "close": row.close or 0,
+                        "directorRatio": row.director_ratio or 0,
+                        "rateOfForeignHolding": row.rate_of_foreign_holding or 0,
+                        "rateOfINGHolding": row.rate_of_ing_holding or 0,
+                        "rateOfDealerHolding": row.rate_of_dealer_holding or 0,
+                    }
+                )
+
+            # 轉換為 DataFrame
+            result_dict = {}
+            for stock_id, records in stock_data_dict.items():
+                df = pd.DataFrame(records)
+                # API 資料已經是週資料，已按日期降序排列，直接取前 N 週
+                weekly_df = df.head(weeks)
+                result_dict[stock_id] = weekly_df
 
             return result_dict
 
