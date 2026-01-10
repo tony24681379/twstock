@@ -3,13 +3,14 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import CandlestickChart from '../components/CandlestickChart'
 import ChipsTabs from '../components/ChipsTabs'
+import { FundamentalCard } from '../components/FundamentalCard'
 import IndicatorCharts from '../components/IndicatorCharts'
 import IndicatorToggles from '../components/IndicatorToggles'
 import PeriodSelector from '../components/PeriodSelector'
-import { fetchChartData, fetchStockDetail, fetchStockHistory, type ChartData } from '../lib/api'
+import { fetchChartData, fetchStockDetail, fetchStockFundamental, fetchStockHistory, type ChartData } from '../lib/api'
 import { getChangeColorClass, getRetailChangeColorClass } from '../lib/colorUtils'
 import { IndicatorCalculator } from '../lib/indicators'
-import type { StockDetail, StockHistory } from '../types/stock'
+import type { FundamentalInfo, StockDetail, StockHistory } from '../types/stock'
 import { extractDateOnly, formatDateForAxis } from '../utils/dateFormatters'
 
 export default function StockDetailPage() {
@@ -19,8 +20,10 @@ export default function StockDetailPage() {
   const [detail, setDetail] = useState<StockDetail | null>(null)
   const [history, setHistory] = useState<StockHistory | null>(null)
   const [chartData, setChartData] = useState<ChartData | null>(null)
+  const [fundamentalInfo, setFundamentalInfo] = useState<FundamentalInfo | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [fundamentalError, setFundamentalError] = useState<string | null>(null)
   const [syncedTime, setSyncedTime] = useState<string | null>(null)
   const [syncedConcentrationData, setSyncedConcentrationData] = useState<{
     weekLabel: string
@@ -77,14 +80,25 @@ export default function StockDetailPage() {
     try {
       setLoading(true)
       setError(null)
-      const [detailData, historyData, chartDataResponse] = await Promise.all([
+      setFundamentalError(null)
+
+      // 並行請求（包含基本面）
+      const [detailData, historyData, chartDataResponse, fundData] = await Promise.all([
         fetchStockDetail(stockId),
         fetchStockHistory(stockId, 12),
-        fetchChartData(stockId, period)  // 不傳 indicators，由前端計算
+        fetchChartData(stockId, period),  // 不傳 indicators，由前端計算
+        fetchStockFundamental(stockId).catch((err) => {
+          setFundamentalError(err instanceof Error ? err.message : '載入基本面資訊失敗')
+          return null
+        })  // 失敗不影響其他資料
       ])
+
       setDetail(detailData)
       setHistory(historyData)
       setChartData(chartDataResponse)
+      if (fundData) {
+        setFundamentalInfo(fundData)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '載入失敗')
     } finally {
@@ -405,6 +419,23 @@ export default function StockDetailPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* 基本面資訊卡 */}
+      {fundamentalInfo && (
+        <FundamentalCard
+          info={fundamentalInfo}
+          className="mt-6"
+        />
+      )}
+
+      {/* 基本面載入錯誤 */}
+      {fundamentalError && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mt-6">
+          <p className="text-yellow-800 dark:text-yellow-200 text-sm">
+            基本面資訊載入失敗：{fundamentalError}
+          </p>
         </div>
       )}
 

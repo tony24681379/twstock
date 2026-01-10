@@ -24,7 +24,9 @@ def sample_stock_list_item():
         "close_price": 600.0,
         "chip_strength": 80,
         "technical_strength": 75,
+        "fundamental_strength": 70,  # 新增
         "overall_strength": 85,
+        "weights": {"chip": 0.5, "technical": 0.3, "fundamental": 0.2},  # 新增
         "signal_strength": 85,  # 必填
         "signal_count": 5,
         "expected_return": 12.5,
@@ -32,6 +34,7 @@ def sample_stock_list_item():
         "risk_level": "低",
         "chip_signals": [],
         "technical_signals": [],
+        "fundamental_signals": [],  # 新增
         "signals": [],
         "major_signals": ["完美結構", "大戶連買3週"],
         "last_updated": datetime.now()  # 必填
@@ -70,5 +73,4 @@ def sample_stock_detail():
         "chip_signals": [],
         "technical_signals": [],
         "signals": []
-    }
     }

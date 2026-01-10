@@ -1,7 +1,7 @@
 """股票相關 Pydantic Models"""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -22,20 +22,30 @@ class StockListItem(BaseModel):
     name: str = Field(..., description="股票名稱")
     close_price: float = Field(..., description="收盤價")
 
-    # 三種強度（新增）
+    # 三種強度（更新：新增基本面強度）
     chip_strength: int = Field(..., ge=0, le=100, description="籌碼強度 (0-100)")
     technical_strength: int = Field(..., ge=0, le=100, description="技術強度 (0-100)")
+    fundamental_strength: int = Field(..., ge=0, le=100, description="基本面強度 (0-100)")
     overall_strength: int = Field(..., ge=0, le=100, description="綜合強度 (0-100)")
+
+    # 權重資訊（新增）
+    weights: Dict[str, float] = Field(
+        default={"chip": 0.5, "technical": 0.3, "fundamental": 0.2},
+        description="計算 overall_strength 使用的權重"
+    )
 
     signal_count: int = Field(..., description="觸發的訊號總數")
     expected_return: float = Field(..., description="預期報酬率 (%)")
     win_rate: float = Field(..., description="歷史勝率 (%)")
     risk_level: str = Field(..., description="風險等級")
 
-    # 訊號列表（新增）
+    # 訊號列表（更新：新增基本面訊號）
     chip_signals: List[ChipSignal] = Field(default_factory=list, description="籌碼訊號")
     technical_signals: List[ChipSignal] = Field(
         default_factory=list, description="技術訊號"
+    )
+    fundamental_signals: List[ChipSignal] = Field(
+        default_factory=list, description="基本面訊號"
     )
 
     # 向後相容（棄用但保留）
@@ -57,8 +67,10 @@ class StockListItem(BaseModel):
                 "close_price": 580.0,
                 "chip_strength": 85,
                 "technical_strength": 72,
-                "overall_strength": 80,
-                "signal_strength": 80,
+                "fundamental_strength": 65,
+                "overall_strength": 78,
+                "weights": {"chip": 0.5, "technical": 0.3, "fundamental": 0.2},
+                "signal_strength": 78,
                 "signal_count": 5,
                 "expected_return": 2.61,
                 "win_rate": 60.2,
@@ -81,7 +93,21 @@ class StockListItem(BaseModel):
                     },
                     {"name": "黃金交叉", "triggered": True, "score": 10},
                 ],
-                "major_signals": ["完美結構", "大戶連買3週", "多頭排列"],
+                "fundamental_signals": [
+                    {
+                        "name": "由虧轉正",
+                        "triggered": True,
+                        "score": 30,
+                        "description": "最近一季EPS 1.5，前季虧損 -0.5"
+                    },
+                    {
+                        "name": "本益比合理",
+                        "triggered": True,
+                        "score": 15,
+                        "description": "PER=18.5 < 20"
+                    }
+                ],
+                "major_signals": ["完美結構", "大戶連買3週", "多頭排列", "由虧轉正"],
                 "last_updated": "2026-01-04T10:00:00",
             }
         }
@@ -136,17 +162,84 @@ class ConcentrationSummary(BaseModel):
     latest_date: datetime = Field(..., description="最新資料日期")
 
 
+class EPSDetail(BaseModel):
+    """逐季 EPS 詳細資料"""
+
+    year: int = Field(..., description="年份")
+    quarter: int = Field(..., ge=1, le=4, description="季度 (1-4)")
+    eps: float = Field(..., description="每股盈餘")
+
+    class Config:
+        from_attributes = True
+
+
+class CapitalInfo(BaseModel):
+    """股本與股數資訊"""
+
+    capital: Optional[float] = Field(None, description="實收資本額（百萬）")
+    outstanding_shares: Optional[float] = Field(None, description="股本（千股）")
+    stock_dividend: Optional[float] = Field(None, description="股票股利")
+
+    class Config:
+        from_attributes = True
+
+
+class HoldingInfo(BaseModel):
+    """持股結構資訊"""
+
+    director_ratio: Optional[float] = Field(None, description="董監持股比率 (%)")
+    foreign_holding_rate: Optional[float] = Field(None, description="外資持股率 (%)")
+    investment_trust_holding_rate: Optional[float] = Field(
+        None, description="投信持股率 (%)"
+    )
+    dealer_holding_rate: Optional[float] = Field(None, description="自營商持股率 (%)")
+    latest_date: Optional[datetime] = Field(None, description="最新資料日期")
+
+    class Config:
+        from_attributes = True
+
+
+class FundamentalInfo(BaseModel):
+    """基本面資訊（詳細頁專用）"""
+
+    # 獲利能力
+    eps_recent_4q: List[float] = Field(..., description="最近4季EPS")
+    eps_trend: str = Field(..., description="上升/下降/持平")
+    eps_stability: float = Field(..., description="EPS標準差")
+    eps_avg: float = Field(..., description="平均EPS")
+
+    # 估值指標
+    per: Optional[float] = Field(None, description="本益比")
+    dividend_yield: float = Field(..., description="股利殖利率 (%)")
+    payout_ratio: float = Field(..., description="配息率 (%)")
+    cash_dividend: float = Field(..., description="現金股利")
+
+    # 訊號
+    fundamental_signals: List[ChipSignal] = Field(
+        default_factory=list, description="基本面訊號"
+    )
+    fundamental_strength: int = Field(..., ge=0, le=100, description="基本面強度評分")
+
+    # 🆕 詳細數據（Tabs 架構用）
+    eps_details: List[EPSDetail] = Field(
+        default_factory=list, description="逐季 EPS 詳細資料"
+    )
+    capital_info: Optional[CapitalInfo] = Field(None, description="股本資訊")
+    holding_info: Optional[HoldingInfo] = Field(None, description="持股結構")
+
+
 class StockDetail(BaseModel):
     """股票詳細資訊（詳情頁專用，不包含三種強度）"""
 
     basic_info: BasicInfo
     price_info: PriceInfo
 
-    # 訊號列表
+    # 訊號列表（更新：新增基本面資訊）
     chip_signals: List[ChipSignal] = Field(default_factory=list, description="籌碼訊號")
     technical_signals: List[ChipSignal] = Field(
         default_factory=list, description="技術訊號"
     )
+    fundamental_info: Optional[FundamentalInfo] = Field(None, description="基本面資訊")
 
     expected_return: float = Field(0.0, description="預期報酬率 (%)")
     win_rate: float = Field(0.0, description="歷史勝率 (%)")

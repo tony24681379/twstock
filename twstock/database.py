@@ -811,7 +811,7 @@ class DatabaseManager:
     async def bulk_load_daily_data(
         self, stock_ids: List[str], days: int = 490
     ) -> Dict[str, pd.DataFrame]:
-        """批次載入多支股票的每日資料（使用單一 SQL 查詢）
+        """批次載入多支股票的每日資料（僅 OHLCV，不含機構數據）
 
         Args:
             stock_ids: 股票代碼列表
@@ -819,44 +819,27 @@ class DatabaseManager:
 
         Returns:
             Dict[stock_id, DataFrame]: 每支股票的 DataFrame
+            DataFrame columns: [date, open, high, low, close, volume]
         """
         stock_ids = [sid.lower() for sid in stock_ids]
 
         async with self.get_session() as session:
-            # 使用單一 SQL 查詢取得所有股票的完整資料（包含 JOIN）
-            # 注意：INTERVAL 不能用參數綁定，直接用 f-string 構建
+            # 優化：只查詢 stock_daily 表，不做 JOIN（技術指標只需要 OHLCV）
             result = await session.execute(
                 text(
                     f"""
                     SELECT
-                        d.stock_id,
-                        d.date,
-                        d.volume,
-                        d.open,
-                        d.high,
-                        d.low,
-                        d.close,
-                        i."foreign",
-                        i.investment_trust,
-                        i.dealer,
-                        i.sum_holding_rate,
-                        i.foreign_holding_rate,
-                        i.investment_trust_holding_rate,
-                        i.dealer_holding_rate,
-                        m.major_investors,
-                        m.agent_diff,
-                        m.skp5,
-                        m.skp20,
-                        mt.lending_balance,
-                        mt.borrowing_balance,
-                        mt.balance_limit
-                    FROM stock_daily d
-                    LEFT JOIN institutional_investors i ON d.stock_id = i.stock_id AND d.date = i.date
-                    LEFT JOIN major_investors m ON d.stock_id = m.stock_id AND d.date = m.date
-                    LEFT JOIN margin_trading mt ON d.stock_id = mt.stock_id AND d.date = mt.date
-                    WHERE d.stock_id = ANY(:stock_ids)
-                    AND d.date >= CURRENT_DATE - INTERVAL '{days} days'
-                    ORDER BY d.stock_id, d.date DESC
+                        stock_id,
+                        date,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume
+                    FROM stock_daily
+                    WHERE stock_id = ANY(:stock_ids)
+                    AND date >= CURRENT_DATE - INTERVAL '{days} days'
+                    ORDER BY stock_id, date DESC
                 """
                 ),
                 {"stock_ids": stock_ids},
@@ -872,26 +855,11 @@ class DatabaseManager:
                 stock_data_dict[stock_id].append(
                     {
                         "date": row.date,
-                        "volume": row.volume,
                         "open": row.open,
                         "high": row.high,
                         "low": row.low,
                         "close": row.close,
-                        "foreign": row.foreign or 0,
-                        "investment_trust": row.investment_trust or 0,
-                        "dealer": row.dealer or 0,
-                        "sum_holding_rate": row.sum_holding_rate or 0,
-                        "foreign_holding_rate": row.foreign_holding_rate or 0,
-                        "investment_trust_holding_rate": row.investment_trust_holding_rate
-                        or 0,
-                        "dealer_holding_rate": row.dealer_holding_rate or 0,
-                        "major_investors": row.major_investors or 0,
-                        "agent_diff": row.agent_diff or 0,
-                        "skp5": row.skp5 or 0,
-                        "skp20": row.skp20 or 0,
-                        "lending_balance": row.lending_balance or 0,
-                        "borrowing_balance": row.borrowing_balance or 0,
-                        "balance_limit": row.balance_limit or 0,
+                        "volume": row.volume,
                     }
                 )
 
@@ -1031,6 +999,78 @@ class DatabaseManager:
             result_dict = {}
             for stock_id, info_data in info_dict.items():
                 result_dict[stock_id] = pd.Series(info_data)
+
+            return result_dict
+
+    async def bulk_load_eps(
+        self, stock_ids: List[str], quarters: int = 4
+    ) -> Dict[str, pd.DataFrame]:
+        """批次載入最近 N 季 EPS（使用單一 SQL 查詢）
+
+        Args:
+            stock_ids: 股票代碼列表
+            quarters: 要載入的季度數量（預設 4 季）
+
+        Returns:
+            Dict[stock_id, DataFrame]: 每支股票的 EPS DataFrame
+            DataFrame columns: [year, quarter, eps]
+            已按 year DESC, quarter DESC 排序（最新季在前）
+        """
+        stock_ids = [sid.lower() for sid in stock_ids]
+
+        async with self.get_session() as session:
+            # 使用 Window Function 取得每支股票最近 N 季的 EPS
+            eps_result = await session.execute(
+                text(
+                    """
+                    WITH ranked_eps AS (
+                        SELECT
+                            stock_id,
+                            year,
+                            quarter,
+                            eps,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY stock_id
+                                ORDER BY year DESC, quarter DESC
+                            ) as rn
+                        FROM stock_eps
+                        WHERE stock_id = ANY(:stock_ids)
+                    )
+                    SELECT stock_id, year, quarter, eps
+                    FROM ranked_eps
+                    WHERE rn <= :quarters
+                    ORDER BY stock_id, year DESC, quarter DESC
+                """
+                ),
+                {"stock_ids": stock_ids, "quarters": quarters},
+            )
+
+            # 按 stock_id 分組建立 DataFrame
+            from collections import defaultdict
+
+            eps_dict = defaultdict(list)
+            for row in eps_result:
+                eps_dict[row.stock_id].append(
+                    {"year": row.year, "quarter": row.quarter, "eps": row.eps}
+                )
+
+            # 轉換為 DataFrame
+            result_dict = {}
+            for stock_id, eps_list in eps_dict.items():
+                if eps_list:
+                    result_dict[stock_id] = pd.DataFrame(eps_list)
+                else:
+                    # 沒有資料時回傳空 DataFrame
+                    result_dict[stock_id] = pd.DataFrame(
+                        columns=["year", "quarter", "eps"]
+                    )
+
+            # 對於沒有 EPS 資料的股票，也回傳空 DataFrame
+            for stock_id in stock_ids:
+                if stock_id not in result_dict:
+                    result_dict[stock_id] = pd.DataFrame(
+                        columns=["year", "quarter", "eps"]
+                    )
 
             return result_dict
 

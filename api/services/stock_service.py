@@ -11,9 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.models.chart import ChartDataResponse, OHLCVData
 from api.models.stock import (
     BasicInfo,
+    CapitalInfo,
+    ChipSignal,
     ChipsData,
     ConcentrationDataPoint,
     ConcentrationSummary,
+    EPSDetail,
+    FundamentalInfo,
+    HoldingInfo,
     InstitutionalData,
     MajorInvestorData,
     MarginTradingData,
@@ -23,6 +28,7 @@ from api.models.stock import (
     StockHistory,
     StockListItem,
 )
+from api.services.fundamental_signal_service import FundamentalSignalService
 from api.services.indicator_service import IndicatorService
 from api.services.signal_service import SignalService
 from api.services.technical_signal_service import TechnicalSignalService
@@ -40,46 +46,77 @@ from twstock.database import (
 logger = logging.getLogger(__name__)
 
 
-async def calculate_technical_score_for_stock(
-    stock_id: str, bulk_info: dict, bulk_daily: dict, all_processor
+async def calculate_all_strengths_for_stock(
+    stock_id: str, bulk_info: dict, bulk_daily: dict, bulk_eps: dict, all_processor
 ) -> tuple:
     """
-    計算單一股票的技術評分（可並行執行）
+    計算單一股票的技術和基本面評分（可並行執行）
 
     Args:
         stock_id: 股票代碼
         bulk_info: 批次股票資訊字典
         bulk_daily: 批次日線資料字典
+        bulk_eps: 批次 EPS 資料字典
         all_processor: All 處理器實例
 
     Returns:
-        (stock_id, score_dict) 或 (stock_id, None) 如果失敗/無資料
+        (stock_id, score_dict) 包含 technical 和 fundamental 兩組分數
     """
-    if stock_id not in bulk_info or stock_id not in bulk_daily:
-        # 沒有資料，返回預設值
-        return stock_id, {"signals": [], "strength": 0, "raw_score": 0}
+    result = {
+        "technical": {"signals": [], "strength": 0, "raw_score": 0},
+        "fundamental": {"signals": [], "strength": 0, "raw_score": 0},
+    }
 
-    try:
-        # 計算技術指標
-        _, skill_series, _, _ = await all_processor.get_stock_from_bulk_data(
-            stock_id, bulk_info[stock_id], bulk_daily[stock_id]
-        )
+    # 計算技術強度
+    if stock_id in bulk_info and stock_id in bulk_daily:
+        try:
+            # 計算技術指標
+            _, skill_series, _, _ = await all_processor.get_stock_from_bulk_data(
+                stock_id, bulk_info[stock_id], bulk_daily[stock_id]
+            )
 
-        # 計算技術訊號分數
-        tech_signals, tech_raw_score = TechnicalSignalService.calculate_signals(
-            skill_series
-        )
-        tech_strength = TechnicalSignalService.normalize_score(tech_raw_score)
+            # 計算技術訊號分數
+            tech_signals, tech_raw_score = TechnicalSignalService.calculate_signals(
+                skill_series
+            )
+            tech_strength = TechnicalSignalService.normalize_score(tech_raw_score)
 
-        return stock_id, {
-            "signals": tech_signals,
-            "strength": tech_strength,
-            "raw_score": tech_raw_score,
-        }
-    except Exception as e:
-        # 如果計算失敗，使用預設值
-        logger.warning(f"計算 {stock_id} 技術評分失敗: {e}")
-        return stock_id, {"signals": [], "strength": 0, "raw_score": 0}
+            result["technical"] = {
+                "signals": tech_signals,
+                "strength": tech_strength,
+                "raw_score": tech_raw_score,
+            }
+        except Exception as e:
+            logger.warning(f"計算 {stock_id} 技術評分失敗: {e}")
+
+    # 計算基本面強度
+    if stock_id in bulk_info:
+        try:
+            stock_info_dict = bulk_info[stock_id]
+            eps_df = bulk_eps.get(stock_id)
+
+            # 取得當前股價（從 stock_info 或 daily data）
+            current_price = stock_info_dict.get("close", 0.0)
+            if current_price == 0 and stock_id in bulk_daily:
+                daily_data = bulk_daily[stock_id]
+                if not daily_data.empty:
+                    current_price = daily_data.iloc[-1]["close"]
+
+            # 計算基本面訊號
+            fund_signals, fund_raw_score = FundamentalSignalService.calculate_signals(
+                stock_info_dict, eps_df, current_price
+            )
+            fund_strength = FundamentalSignalService.normalize_score(fund_raw_score)
+
+            result["fundamental"] = {
+                "signals": fund_signals,
+                "strength": fund_strength,
+                "raw_score": fund_raw_score,
+            }
+        except Exception as e:
+            logger.warning(f"計算 {stock_id} 基本面評分失敗: {e}")
+
+    return stock_id, result
 
 
 class StockService:
@@ -92,6 +129,9 @@ class StockService:
         order: str = "asc",
         limit: int = 100,
         offset: int = 0,
+        chip_weight: float = 0.5,
+        tech_weight: float = 0.3,
+        fund_weight: float = 0.2,
     ) -> Tuple[List[StockListItem], PaginationMetadata]:
         """
         取得股票列表
@@ -102,6 +142,9 @@ class StockService:
             order: 排序方向（asc/desc）
             limit: 每頁筆數
             offset: 偏移量
+            chip_weight: 籌碼權重（預設 0.5）
+            tech_weight: 技術權重（預設 0.3）
+            fund_weight: 基本面權重（預設 0.2）
 
         Returns:
             股票列表與分頁資訊
@@ -231,7 +274,10 @@ class StockService:
             concentration_by_stock[stock_id].append(conc)
 
         # 批次計算技術指標（使用 SQL JOIN，避免 N+1 查詢）
-        print(f"📊 開始批次計算技術指標（{len(stock_ids)} 支股票）...")
+        import time
+        import sys
+        start_time = time.time()
+        print(f"📊 開始批次計算（{len(stock_ids)} 支股票）", file=sys.stderr, flush=True)
 
         # 初始化 DatabaseManager（使用 SQL JOIN 批次載入）
         from api.main import db_manager as api_db_manager
@@ -240,52 +286,60 @@ class StockService:
             # 如果 API 的 db_manager 未初始化，創建新的
             api_db_manager = DatabaseManager()
 
-        # 批次載入股票資料（使用單一 SQL 查詢 + LEFT JOIN）
-        # bulk_load_daily_data 已使用 LEFT JOIN 整合：
-        # - stock_daily
-        # - institutional_investors
-        # - major_investors
-        # - margin_trading
+        # 批次載入股票資料（使用單一 SQL 查詢）
+        t1 = time.time()
         bulk_info = await api_db_manager.bulk_load_stock_info(stock_ids)
+        print(f"⏱️  bulk_load_stock_info: {time.time() - t1:.2f}s", file=sys.stderr, flush=True)
+
+        t2 = time.time()
         bulk_daily = await api_db_manager.bulk_load_daily_data(
-            stock_ids, days=90
-        )  # 優化：只載入 90 天數據（足夠所有技術指標）
+            stock_ids, days=70
+        )  # 優化：載入 70 天數據（60 交易日≈84 日曆日，70 天含安全邊際）
+        print(f"⏱️  bulk_load_daily_data: {time.time() - t2:.2f}s", file=sys.stderr, flush=True)
+
+        # 批次載入 EPS 資料（用於基本面分析）
+        t3 = time.time()
+        bulk_eps = await api_db_manager.bulk_load_eps(stock_ids, quarters=4)
+        print(f"⏱️  bulk_load_eps: {time.time() - t3:.2f}s", file=sys.stderr, flush=True)
 
         # 初始化 All 處理器（用於批次計算技術指標）
         from twstock import All
 
         all_processor = All()
 
-        # ✅ 並行計算技術訊號（核心性能優化）
+        # ✅ 並行計算技術和基本面訊號（核心性能優化）
         # 使用 Semaphore 限制同時處理的股票數量，避免記憶體爆炸
         semaphore = asyncio.Semaphore(100)  # 限制同時處理 100 支股票
 
         async def limited_calculate(stock_id):
             """使用 Semaphore 限制並發的計算函數"""
             async with semaphore:
-                return await calculate_technical_score_for_stock(
-                    stock_id, bulk_info, bulk_daily, all_processor
+                return await calculate_all_strengths_for_stock(
+                    stock_id, bulk_info, bulk_daily, bulk_eps, all_processor
                 )
 
-        # 並行執行所有股票的技術指標計算
+        # 並行執行所有股票的技術和基本面指標計算
+        t4 = time.time()
         results = await asyncio.gather(
             *[limited_calculate(stock_id) for stock_id in stock_ids],
             return_exceptions=True,  # 避免單一股票失敗導致整體失敗
         )
+        print(f"⏱️  並行計算: {time.time() - t4:.2f}s", file=sys.stderr, flush=True)
 
-        # 建立技術評分字典
-        technical_scores = {}
+        # 建立評分字典
+        all_scores = {}
         for result in results:
             if isinstance(result, Exception):
-                logger.error(f"計算技術評分異常: {result}")
+                logger.error(f"計算評分異常: {result}")
                 continue
-            stock_id, score = result
-            if score is not None:
-                technical_scores[stock_id] = score
+            stock_id, scores = result
+            if scores is not None:
+                all_scores[stock_id] = scores
 
-        print(f"   ✓ 技術指標計算完成（並行處理 {len(stock_ids)} 支股票）")
+        print(f"✅ 完成（{len(stock_ids)} 支股票）", file=sys.stderr, flush=True)
+        print(f"⏱️  總耗時: {time.time() - start_time:.2f}s", file=sys.stderr, flush=True)
 
-        # 組裝回應資料（整合籌碼 + 技術）
+        # 組裝回應資料（整合籌碼 + 技術 + 基本面）
         items = []
         for stock_list, stock_info, close_price, last_date in rows:
             stock_id = stock_list.stock_id
@@ -304,15 +358,25 @@ class StockService:
 
             chip_strength = SignalService.normalize_score(chip_raw_score)
 
-            # === 技術強度（新增）===
-            tech_data = technical_scores.get(
-                stock_id, {"signals": [], "strength": 0, "raw_score": 0}
+            # === 技術強度和基本面強度（從並行計算結果取得）===
+            scores = all_scores.get(
+                stock_id,
+                {
+                    "technical": {"signals": [], "strength": 0, "raw_score": 0},
+                    "fundamental": {"signals": [], "strength": 0, "raw_score": 0},
+                },
             )
-            tech_strength = tech_data["strength"]
-            tech_signals = tech_data["signals"]
+            tech_strength = scores["technical"]["strength"]
+            tech_signals = scores["technical"]["signals"]
+            fund_strength = scores["fundamental"]["strength"]
+            fund_signals = scores["fundamental"]["signals"]
 
-            # === 綜合強度（加權平均：籌碼 60% + 技術 40%）===
-            overall_strength = int(chip_strength * 0.6 + tech_strength * 0.4)
+            # === 綜合強度（使用自訂權重）===
+            overall_strength = int(
+                chip_strength * chip_weight
+                + tech_strength * tech_weight
+                + fund_strength * fund_weight
+            )
 
             # 風險等級（基於綜合強度）
             if overall_strength >= 70:
@@ -323,7 +387,7 @@ class StockService:
                 risk_level = "高"
 
             # 合併訊號（用於向後相容）
-            all_signals = chip_signals + tech_signals
+            all_signals = chip_signals + tech_signals + fund_signals
             major_signals = [s.name for s in all_signals[:3]]
 
             items.append(
@@ -334,10 +398,18 @@ class StockService:
                     # 三種強度
                     chip_strength=chip_strength,
                     technical_strength=tech_strength,
+                    fundamental_strength=fund_strength,  # 新增
                     overall_strength=overall_strength,
+                    # 權重資訊（新增）
+                    weights={
+                        "chip": chip_weight,
+                        "technical": tech_weight,
+                        "fundamental": fund_weight,
+                    },
                     # 訊號列表
                     chip_signals=chip_signals,
                     technical_signals=tech_signals,
+                    fundamental_signals=fund_signals,  # 新增
                     signals=all_signals,  # 合併（向後相容）
                     signal_count=len(all_signals),
                     expected_return=expected_return,
@@ -356,6 +428,7 @@ class StockService:
             sort_key_map = {
                 "chip_strength": lambda x: x.chip_strength,
                 "technical_strength": lambda x: x.technical_strength,
+                "fundamental_strength": lambda x: x.fundamental_strength,  # 新增
                 "overall_strength": lambda x: x.overall_strength,
                 "signal_strength": lambda x: x.signal_strength,  # 向後相容
                 "expected_return": lambda x: x.expected_return,
@@ -770,4 +843,156 @@ class StockService:
             major=major_data,
             margin=margin_data,
             concentration=concentration_summary,
+        )
+
+    @staticmethod
+    async def get_fundamental_info(
+        session: AsyncSession, stock_id: str
+    ) -> Optional[FundamentalInfo]:
+        """
+        取得股票基本面資訊（詳細頁專用）
+
+        Args:
+            session: 資料庫 session
+            stock_id: 股票代碼
+
+        Returns:
+            基本面資訊或 None
+        """
+        # 查詢股票基本資訊
+        stock_info_query = select(StockInfo).where(StockInfo.stock_id == stock_id)
+        stock_info_result = await session.execute(stock_info_query)
+        stock_info = stock_info_result.scalar_one_or_none()
+
+        if not stock_info:
+            return None
+
+        # 查詢最新股價
+        stock_daily_query = (
+            select(StockDaily)
+            .where(StockDaily.stock_id == stock_id)
+            .order_by(desc(StockDaily.date))
+            .limit(1)
+        )
+        stock_daily_result = await session.execute(stock_daily_query)
+        stock_daily = stock_daily_result.scalar_one_or_none()
+
+        current_price = stock_daily.close if stock_daily else 0.0
+
+        # 初始化 DatabaseManager
+        from api.main import db_manager as api_db_manager
+
+        if not api_db_manager:
+            api_db_manager = DatabaseManager()
+
+        # 載入最近 4 季 EPS
+        eps_dict = await api_db_manager.bulk_load_eps([stock_id], quarters=4)
+        eps_df = eps_dict.get(stock_id)
+
+        # 準備 stock_info_dict
+        stock_info_dict = {
+            "per": stock_info.per,
+            "cash_dividend": stock_info.cash_dividend,
+            "stock_dividend": stock_info.stock_dividend,
+            "capital": stock_info.capital,
+            "outstanding_shares": stock_info.outstanding_shares,
+        }
+
+        # 計算基本面訊號
+        fund_signals, fund_raw_score = FundamentalSignalService.calculate_signals(
+            stock_info_dict, eps_df, current_price
+        )
+        fund_strength = FundamentalSignalService.normalize_score(fund_raw_score)
+
+        # 計算 EPS 指標
+        eps_recent_4q = []
+        eps_trend = "持平"
+        eps_stability = 0.0
+        eps_avg = 0.0
+
+        if eps_df is not None and not eps_df.empty:
+            eps_recent_4q = eps_df["eps"].tolist()
+            eps_avg = eps_df["eps"].mean()
+            eps_stability = eps_df["eps"].std()
+
+            # 判斷趨勢
+            if len(eps_recent_4q) >= 2:
+                if eps_recent_4q[0] > eps_recent_4q[-1]:
+                    eps_trend = "上升"
+                elif eps_recent_4q[0] < eps_recent_4q[-1]:
+                    eps_trend = "下降"
+
+        # 計算股利殖利率
+        dividend_yield = 0.0
+        if current_price > 0 and stock_info.cash_dividend:
+            dividend_yield = (stock_info.cash_dividend / current_price) * 100
+
+        # 計算配息率
+        payout_ratio = 0.0
+        if eps_avg > 0 and stock_info.cash_dividend:
+            payout_ratio = (stock_info.cash_dividend / eps_avg) * 100
+
+        # 🆕 查詢最新籌碼集中度資料（用於持股結構）
+        concentration_query = (
+            select(ConcentrationData)
+            .where(ConcentrationData.stock_id == stock_id)
+            .order_by(desc(ConcentrationData.date))
+            .limit(1)
+        )
+        concentration_result = await session.execute(concentration_query)
+        concentration = concentration_result.scalar_one_or_none()
+
+        # 🆕 建立 EPSDetail 列表（用於詳細表格）
+        eps_details = []
+        if eps_df is not None and not eps_df.empty:
+            for _, row in eps_df.iterrows():
+                eps_details.append(
+                    EPSDetail(
+                        year=int(row["year"]),
+                        quarter=int(row["quarter"]),
+                        eps=float(row["eps"]),
+                    )
+                )
+
+        # 🆕 建立 CapitalInfo
+        capital_info = CapitalInfo(
+            capital=stock_info.capital,
+            outstanding_shares=stock_info.outstanding_shares,
+            stock_dividend=stock_info.stock_dividend,
+        )
+
+        # 🆕 建立 HoldingInfo（如果有籌碼資料）
+        holding_info = None
+        if concentration:
+            holding_info = HoldingInfo(
+                director_ratio=concentration.director_ratio,
+                foreign_holding_rate=concentration.rate_of_foreign_holding,
+                investment_trust_holding_rate=concentration.rate_of_ing_holding,
+                dealer_holding_rate=concentration.rate_of_dealer_holding,
+                latest_date=concentration.date,
+            )
+
+        return FundamentalInfo(
+            eps_recent_4q=eps_recent_4q,
+            eps_trend=eps_trend,
+            eps_stability=eps_stability,
+            eps_avg=eps_avg,
+            per=stock_info.per,
+            dividend_yield=dividend_yield,
+            payout_ratio=payout_ratio,
+            cash_dividend=stock_info.cash_dividend or 0.0,
+            fundamental_signals=[
+                ChipSignal(
+                    name=signal["name"],
+                    triggered=signal["triggered"],
+                    score=signal["score"],
+                    description=signal.get("description"),
+                )
+                for signal in fund_signals
+            ],
+            fundamental_strength=fund_strength,
+            # 🆕 新增欄位
+            eps_details=eps_details,
+            capital_info=capital_info,
+            holding_info=holding_info,
         )

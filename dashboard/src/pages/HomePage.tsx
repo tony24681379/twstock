@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { PAGINATION } from '../constants/apiConfig'
 import { fetchStocks } from '../lib/api'
 import { getSignalStrengthBadgeClass } from '../lib/colorUtils'
+import { WeightController } from '../components/WeightController'
 import type { StockListItem } from '../types/stock'
 
 export default function HomePage() {
@@ -15,6 +16,23 @@ export default function HomePage() {
   const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'overall_strength')
   const [order, setOrder] = useState(searchParams.get('order') || 'desc')
 
+  // 權重狀態（從 localStorage 讀取，與 WeightController 保持一致）
+  const [weights, setWeights] = useState(() => {
+    const saved = localStorage.getItem('strengthWeights')
+    if (saved) {
+      try {
+        return JSON.parse(saved)
+      } catch {
+        // fallback to default
+      }
+    }
+    return {
+      chip: 0.5,
+      technical: 0.3,
+      fundamental: 0.2
+    }
+  })
+
   // 同步排序狀態到 URL
   useEffect(() => {
     setSearchParams({
@@ -23,17 +41,26 @@ export default function HomePage() {
     }, { replace: true })
   }, [sortBy, order, setSearchParams])
 
-  // 載入股票資料（依賴排序參數）
+  // 載入股票資料（依賴排序參數和權重的各個屬性）
   useEffect(() => {
     loadStocks()
-  }, [sortBy, order])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortBy, order, weights.chip, weights.technical, weights.fundamental])
 
   const loadStocks = async () => {
     try {
       setLoading(true)
       setError(null)
-      // 載入所有股票
-      const response = await fetchStocks(sortBy, order, PAGINATION.LOAD_ALL_LIMIT, 0)
+      // 載入所有股票，傳遞權重參數
+      const response = await fetchStocks({
+        sortBy,
+        order,
+        limit: PAGINATION.LOAD_ALL_LIMIT,
+        offset: 0,
+        chipWeight: weights.chip,
+        techWeight: weights.technical,
+        fundWeight: weights.fundamental
+      })
       setStocks(response.data)
     } catch (err) {
       setError(err instanceof Error ? err.message : '載入失敗')
@@ -89,6 +116,12 @@ export default function HomePage() {
         </p>
       </div>
 
+      {/* 權重控制器 */}
+      <WeightController
+        onChange={setWeights}
+        className="mb-6"
+      />
+
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -118,6 +151,12 @@ export default function HomePage() {
                   className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   技術強度{getSortIndicator('technical_strength')}
+                </th>
+                <th
+                  onClick={() => handleSort('fundamental_strength')}
+                  className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  基本面強度{getSortIndicator('fundamental_strength')}
                 </th>
                 <th
                   onClick={() => handleSort('overall_strength')}
@@ -162,6 +201,13 @@ export default function HomePage() {
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.technical_strength)}`}>
                       {stock.technical_strength}
+                    </span>
+                  </td>
+
+                  {/* 基本面強度 */}
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.fundamental_strength)}`}>
+                      {stock.fundamental_strength}
                     </span>
                   </td>
 

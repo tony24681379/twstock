@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from api.models.chart import ChartDataResponse
-from api.models.stock import ChipsData, StockDetail, StockHistory, StockListResponse
+from api.models.stock import ChipsData, FundamentalInfo, StockDetail, StockHistory, StockListResponse
 from api.services.stock_service import StockService
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
@@ -29,21 +29,39 @@ async def list_stocks(
     order: str = Query("desc", description="排序方向 (asc/desc)"),
     limit: int = Query(DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE, description="每頁筆數"),
     offset: int = Query(0, ge=0, description="偏移量"),
+    # 新增：自訂權重參數
+    chip_weight: float = Query(0.5, ge=0, le=1, description="籌碼權重"),
+    tech_weight: float = Query(0.3, ge=0, le=1, description="技術權重"),
+    fund_weight: float = Query(0.2, ge=0, le=1, description="基本面權重"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
-    取得股票列表
+    取得股票列表（支援自訂權重）
 
-    - **sort_by**: 排序欄位（stock_id, chip_strength, technical_strength, overall_strength, expected_return, win_rate, signal_count）
+    - **sort_by**: 排序欄位（stock_id, chip_strength, technical_strength, fundamental_strength, overall_strength, expected_return, win_rate, signal_count）
     - **order**: 排序方向（asc, desc）
     - **limit**: 每頁筆數（最大 500）
     - **offset**: 偏移量
+    - **chip_weight**: 籌碼權重（0-1，預設 0.5）
+    - **tech_weight**: 技術權重（0-1，預設 0.3）
+    - **fund_weight**: 基本面權重（0-1，預設 0.2）
+
+    三種權重總和必須為 1.0
     """
+    # 驗證權重總和
+    total = chip_weight + tech_weight + fund_weight
+    if abs(total - 1.0) > 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"權重總和必須為 1.0（當前: {total:.2f}）"
+        )
+
     # 驗證參數
     allowed_sort_fields = [
         "stock_id",
         "chip_strength",
         "technical_strength",
+        "fundamental_strength",  # 新增
         "overall_strength",
         "signal_strength",  # 向後相容
         "expected_return",
@@ -61,7 +79,8 @@ async def list_stocks(
 
     try:
         items, pagination = await StockService.get_stock_list(
-            session, sort_by, order, limit, offset
+            session, sort_by, order, limit, offset,
+            chip_weight, tech_weight, fund_weight  # 傳遞權重
         )
 
         # 設定快取標頭（資料每小時更新一次）
@@ -177,6 +196,36 @@ async def get_stock_chips(
             )
 
         return chips_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/{stock_id}/fundamental", response_model=FundamentalInfo)
+async def get_stock_fundamental(
+    stock_id: str,
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    取得股票基本面資訊（詳細頁專用）
+
+    - **stock_id**: 股票代碼
+    """
+    # 驗證股票代碼格式
+    if not stock_id or len(stock_id) < 3 or len(stock_id) > 6:
+        raise HTTPException(status_code=400, detail="Invalid stock ID format")
+
+    try:
+        fundamental_info = await StockService.get_fundamental_info(session, stock_id)
+
+        if not fundamental_info:
+            raise HTTPException(
+                status_code=404, detail=f"Stock ID {stock_id} not found"
+            )
+
+        return fundamental_info
 
     except HTTPException:
         raise
