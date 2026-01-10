@@ -1,0 +1,238 @@
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { PAGINATION } from '../constants/apiConfig'
+import { fetchStocks } from '../lib/api'
+import { getSignalStrengthBadgeClass } from '../lib/colorUtils'
+import type { StockListItem } from '../types/stock'
+
+export default function HomePage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [stocks, setStocks] = useState<StockListItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // 從 URL 讀取排序參數，預設為綜合強度降序
+  const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'overall_strength')
+  const [order, setOrder] = useState(searchParams.get('order') || 'desc')
+
+  // 同步排序狀態到 URL
+  useEffect(() => {
+    setSearchParams({
+      sortBy,
+      order
+    }, { replace: true })
+  }, [sortBy, order, setSearchParams])
+
+  // 載入股票資料（依賴排序參數）
+  useEffect(() => {
+    loadStocks()
+  }, [sortBy, order])
+
+  const loadStocks = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      // 載入所有股票
+      const response = await fetchStocks(sortBy, order, PAGINATION.LOAD_ALL_LIMIT, 0)
+      setStocks(response.data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '載入失敗')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setOrder(order === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(field)
+      setOrder('desc')
+    }
+  }
+
+  const getSortIndicator = (field: string) => {
+    if (sortBy !== field) return ''
+    return order === 'asc' ? ' ↑' : ' ↓'
+  }
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="text-lg text-gray-600 dark:text-gray-400">載入中...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+        <p className="text-red-800 dark:text-red-200">錯誤: {error}</p>
+        <button
+          onClick={loadStocks}
+          className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+        >
+          重試
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-xl font-heading font-semibold text-gray-900 dark:text-gray-100">
+          股票列表
+        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          共 {stocks.length} 支股票（已載入全部）
+        </p>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-900">
+              <tr>
+                <th
+                  onClick={() => handleSort('stock_id')}
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  股票代碼{getSortIndicator('stock_id')}
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  股票名稱
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  收盤價
+                </th>
+                {/* 三種強度欄位 */}
+                <th
+                  onClick={() => handleSort('chip_strength')}
+                  className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  籌碼強度{getSortIndicator('chip_strength')}
+                </th>
+                <th
+                  onClick={() => handleSort('technical_strength')}
+                  className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  技術強度{getSortIndicator('technical_strength')}
+                </th>
+                <th
+                  onClick={() => handleSort('overall_strength')}
+                  className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  綜合強度{getSortIndicator('overall_strength')}
+                </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  訊號數量
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+              {stocks.map((stock) => (
+                <tr
+                  key={stock.stock_id}
+                  className="group hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                >
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <Link
+                      to={`/stocks/${stock.stock_id}`}
+                      className="text-sm font-medium text-primary hover:underline"
+                    >
+                      {stock.stock_id}
+                    </Link>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                    {stock.name}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 dark:text-gray-100">
+                    ${stock.close_price.toFixed(2)}
+                  </td>
+
+                  {/* 籌碼強度 */}
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.chip_strength)}`}>
+                      {stock.chip_strength}
+                    </span>
+                  </td>
+
+                  {/* 技術強度 */}
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.technical_strength)}`}>
+                      {stock.technical_strength}
+                    </span>
+                  </td>
+
+                  {/* 綜合強度（加粗 + Tooltip）*/}
+                  <td className="px-6 py-4 whitespace-nowrap text-center relative">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${getSignalStrengthBadgeClass(stock.overall_strength)}`}>
+                      {stock.overall_strength}
+                    </span>
+
+                    {/* Tooltip：分別顯示籌碼訊號和技術訊號 */}
+                    {((stock.chip_signals && stock.chip_signals.length > 0) || (stock.technical_signals && stock.technical_signals.length > 0)) && (
+                      <div className="hidden group-hover:block absolute top-full left-1/2 -translate-x-1/2 mt-2
+                                      bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900
+                                      rounded-lg px-3 py-2 text-xs shadow-xl z-50 min-w-[300px]
+                                      before:content-[''] before:absolute before:bottom-full before:left-1/2 before:-translate-x-1/2
+                                      before:border-4 before:border-transparent before:border-b-gray-900 dark:before:border-b-gray-100">
+
+                        {/* 籌碼訊號 */}
+                        {stock.chip_signals && stock.chip_signals.length > 0 && (
+                          <div className="mb-2">
+                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
+                              籌碼訊號 ({stock.chip_signals.length}):
+                            </div>
+                            <div className="space-y-0.5">
+                              {stock.chip_signals.map((signal, idx) => (
+                                <div key={idx} className="flex justify-between gap-3">
+                                  <span className="text-left">• {signal.name}</span>
+                                  <span className={`font-semibold ${
+                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
+                                  }`}>
+                                    {signal.score > 0 ? '+' : ''}{signal.score}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 技術訊號 */}
+                        {stock.technical_signals && stock.technical_signals.length > 0 && (
+                          <div>
+                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
+                              技術訊號 ({stock.technical_signals.length}):
+                            </div>
+                            <div className="space-y-0.5">
+                              {stock.technical_signals.map((signal, idx) => (
+                                <div key={idx} className="flex justify-between gap-3">
+                                  <span className="text-left">• {signal.name}</span>
+                                  <span className={`font-semibold ${
+                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
+                                  }`}>
+                                    {signal.score > 0 ? '+' : ''}{signal.score}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-900 dark:text-gray-100">
+                    {stock.signal_count}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -264,7 +264,7 @@ class All:
             print(f"   載入 {len(all_stock_ids)} 支股票的資料...")
             # 使用批次 SQL 查詢（只查詢一次！）
             bulk_daily_data = await self.fetcher.db_manager.bulk_load_daily_data(
-                all_stock_ids, days=490
+                all_stock_ids, days=90  # 優化：只載入 90 天數據（足夠計算所有技術指標）
             )
             bulk_info_data = await self.fetcher.db_manager.bulk_load_stock_info(
                 all_stock_ids
@@ -286,11 +286,15 @@ class All:
             stock_ids_for_concentration = [
                 sid for sid in all_stock_ids if not sid.startswith("^")
             ]
-            print(f"   過濾後剩餘: {len(stock_ids_for_concentration)} 支股票（排除 {len(all_stock_ids) - len(stock_ids_for_concentration)} 支指數）")
+            print(
+                f"   過濾後剩餘: {len(stock_ids_for_concentration)} 支股票（排除 {len(all_stock_ids) - len(stock_ids_for_concentration)} 支指數）"
+            )
 
             # Step 1: 批次從 DB 載入股票的集中度資料
             if hasattr(self.fetcher, "db_manager"):
-                print(f"   載入 {len(stock_ids_for_concentration)} 支股票的集中度資料...")
+                print(
+                    f"   載入 {len(stock_ids_for_concentration)} 支股票的集中度資料..."
+                )
                 concentration_data = (
                     await self.fetcher.db_manager.bulk_load_concentration_data(
                         stock_ids_for_concentration, weeks=10
@@ -307,7 +311,10 @@ class All:
                 else:
                     # 檢查資料是否過舊（超過 7 天）
                     df = concentration_data[sid]
-                    if df.empty or (datetime.datetime.now() - df.iloc[0]["date"]).days > 7:
+                    if (
+                        df.empty
+                        or (datetime.datetime.now() - df.iloc[0]["date"]).days > 7
+                    ):
                         stocks_need_api.append(sid)
 
             # Step 3: 只對需要更新的股票調用 API
@@ -540,9 +547,7 @@ class All:
                     concentration_excel.to_excel(
                         writer, sheet_name="每週籌碼變化", index=False
                     )
-                    print(
-                        f"   ✓ 籌碼變化 sheet: {len(concentration_excel)} 支股票"
-                    )
+                    print(f"   ✓ 籌碼變化 sheet: {len(concentration_excel)} 支股票")
 
                     # Sheet 2: 籌碼訊號（強化版）
                     signal_excel_basic = self.generate_concentration_signals(
@@ -689,10 +694,7 @@ class All:
 
             # 3. 大戶連買3週 (+12分)
             if len(values_400) >= 3:
-                if (
-                    values_400[0] > values_400[1]
-                    and values_400[1] > values_400[2]
-                ):
+                if values_400[0] > values_400[1] and values_400[1] > values_400[2]:
                     signals.append("🟢大戶連買3週")
                     score += 12
 
@@ -705,14 +707,20 @@ class All:
 
             # 5. 加速集中 (+10分)
             if len(df) >= 10:
-                first_5_avg = sum(
-                    df.iloc[i]["moreThan400"] - df.iloc[i + 1]["moreThan400"]
-                    for i in range(4)
-                ) / 4
-                last_5_avg = sum(
-                    df.iloc[i]["moreThan400"] - df.iloc[i + 1]["moreThan400"]
-                    for i in range(5, 9)
-                ) / 4
+                first_5_avg = (
+                    sum(
+                        df.iloc[i]["moreThan400"] - df.iloc[i + 1]["moreThan400"]
+                        for i in range(4)
+                    )
+                    / 4
+                )
+                last_5_avg = (
+                    sum(
+                        df.iloc[i]["moreThan400"] - df.iloc[i + 1]["moreThan400"]
+                        for i in range(5, 9)
+                    )
+                    / 4
+                )
                 if first_5_avg > last_5_avg and first_5_avg > 0:
                     signals.append("🟢加速集中")
                     score += 10
@@ -769,16 +777,21 @@ class All:
                         "訊號強度": normalized_score,
                         "訊號數量": len(signals),
                         "主要訊號": ", ".join(signals[:3]),  # 只顯示前 3 個
-                        "大戶10週變化": round(
-                            df.iloc[0]["moreThan400"] - df.iloc[-1]["moreThan400"], 2
-                        )
-                        if len(df) >= 10
-                        else None,
-                        "散戶10週變化": round(
-                            df.iloc[0]["lessThan20"] - df.iloc[-1]["lessThan20"], 2
-                        )
-                        if len(df) >= 10
-                        else None,
+                        "大戶10週變化": (
+                            round(
+                                df.iloc[0]["moreThan400"] - df.iloc[-1]["moreThan400"],
+                                2,
+                            )
+                            if len(df) >= 10
+                            else None
+                        ),
+                        "散戶10週變化": (
+                            round(
+                                df.iloc[0]["lessThan20"] - df.iloc[-1]["lessThan20"], 2
+                            )
+                            if len(df) >= 10
+                            else None
+                        ),
                         "最新大戶占比": round(df.iloc[0]["moreThan400"], 2),
                         "最新散戶占比": round(df.iloc[0]["lessThan20"], 2),
                     }
@@ -864,24 +877,28 @@ class All:
 
                 # 5. 加速集中（需要 10 週資料）
                 if len(df) >= 10 and i <= len(df) - 10:
-                    first_5_avg = sum(
-                        df.iloc[i + j]["moreThan400"]
-                        - df.iloc[i + j + 1]["moreThan400"]
-                        for j in range(4)
-                    ) / 4
-                    last_5_avg = sum(
-                        df.iloc[i + j]["moreThan400"]
-                        - df.iloc[i + j + 1]["moreThan400"]
-                        for j in range(5, 9)
-                    ) / 4
+                    first_5_avg = (
+                        sum(
+                            df.iloc[i + j]["moreThan400"]
+                            - df.iloc[i + j + 1]["moreThan400"]
+                            for j in range(4)
+                        )
+                        / 4
+                    )
+                    last_5_avg = (
+                        sum(
+                            df.iloc[i + j]["moreThan400"]
+                            - df.iloc[i + j + 1]["moreThan400"]
+                            for j in range(5, 9)
+                        )
+                        / 4
+                    )
                     if first_5_avg > last_5_avg and first_5_avg > 0:
                         signal_performance["加速集中"].append(future_return)
 
                 # 6. 10週持續買
                 if len(df) >= 10 and i == 0:
-                    delta_10w = (
-                        df.iloc[0]["moreThan400"] - df.iloc[9]["moreThan400"]
-                    )
+                    delta_10w = df.iloc[0]["moreThan400"] - df.iloc[9]["moreThan400"]
                     if delta_10w > 3.0:
                         signal_performance["10週持續買"].append(future_return)
 

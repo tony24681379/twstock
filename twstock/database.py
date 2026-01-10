@@ -172,6 +172,8 @@ class StockList(Base):
     is_active = Column(Boolean, default=True, comment="是否啟用")
     updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
 
+    __table_args__ = (Index("idx_stock_list_active_market", "is_active", "market"),)
+
 
 class StockUpdateTracker(Base):
     """股票更新追蹤表"""
@@ -604,7 +606,9 @@ class DatabaseManager:
                             "rate_of_foreign_holding": safe_float(
                                 row.get("rateOfForeignHolding")
                             ),
-                            "rate_of_ing_holding": safe_float(row.get("rateOfINGHolding")),
+                            "rate_of_ing_holding": safe_float(
+                                row.get("rateOfINGHolding")
+                            ),
                             "rate_of_dealer_holding": safe_float(
                                 row.get("rateOfDealerHolding")
                             ),

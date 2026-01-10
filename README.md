@@ -21,6 +21,20 @@ twstock 台灣股市股票價格擷取
 
 (請注意，TWSE 有 request limit, 每 5 秒鐘 3 個 request，超過的話會被 ban 掉，請自行注意)
 
+## 專案文件語言政策
+
+本專案文件以**繁體中文**為主要語言：
+- 使用者文件（README、教學、指南）
+- OpenSpec 變更提案與規格（`openspec/changes/`、`openspec/specs/`）
+- 程式碼註解（特別是台灣股市領域邏輯）
+
+技術術語保持英文，以維持與程式碼和國際慣例的一致性：
+- 程式語言（Python、TypeScript）
+- 框架與函式庫（FastAPI、Next.js、PostgreSQL、pandas）
+- 技術概念（async/await、ORM、API、Docker）
+
+若您是協作者，請在建立文件時遵循此語言政策。更多細節請參考 `openspec/AGENTS.md`（OpenSpec 工作流程）與 `openspec/project.md`（專案規範）。
+
 ## Documentation
 
 * [twstock documentation (正體中文)](http://twstock.readthedocs.io/zh_TW/latest)
