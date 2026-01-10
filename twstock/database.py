@@ -274,13 +274,7 @@ class DatabaseManager:
                         """
                         INSERT INTO stock_info (stock_id, capital, outstanding_shares, per, cash_dividend, stock_dividend, updated_at)
                         VALUES (:stock_id, :capital, :outstanding_shares, :per, :cash_dividend, :stock_dividend, :updated_at)
-                        ON CONFLICT (stock_id) DO UPDATE SET
-                            capital = EXCLUDED.capital,
-                            outstanding_shares = EXCLUDED.outstanding_shares,
-                            per = EXCLUDED.per,
-                            cash_dividend = EXCLUDED.cash_dividend,
-                            stock_dividend = EXCLUDED.stock_dividend,
-                            updated_at = EXCLUDED.updated_at
+                        ON CONFLICT (stock_id) DO NOTHING
                     """
                     ),
                     {
@@ -347,8 +341,7 @@ class DatabaseManager:
                             """
                             INSERT INTO stock_eps (stock_id, year, quarter, eps)
                             VALUES (:stock_id, :year, :quarter, :eps)
-                            ON CONFLICT (stock_id, year, quarter) DO UPDATE SET
-                                eps = EXCLUDED.eps
+                            ON CONFLICT (stock_id, year, quarter) DO NOTHING
                         """
                         ),
                         eps_records,
@@ -494,12 +487,7 @@ class DatabaseManager:
                             INSERT INTO stock_daily
                             (id, stock_id, date, volume, open, high, low, close)
                             VALUES (:id, :stock_id, :date, :volume, :open, :high, :low, :close)
-                            ON CONFLICT (stock_id, date) DO UPDATE SET
-                                volume = EXCLUDED.volume,
-                                open = EXCLUDED.open,
-                                high = EXCLUDED.high,
-                                low = EXCLUDED.low,
-                                close = EXCLUDED.close
+                            ON CONFLICT (stock_id, date) DO NOTHING
                         """
                         ),
                         daily_records,
@@ -515,14 +503,7 @@ class DatabaseManager:
                              foreign_holding_rate, investment_trust_holding_rate, dealer_holding_rate)
                             VALUES (:id, :stock_id, :date, :foreign, :investment_trust, :dealer, :sum_holding_rate,
                                     :foreign_holding_rate, :investment_trust_holding_rate, :dealer_holding_rate)
-                            ON CONFLICT (stock_id, date) DO UPDATE SET
-                                "foreign" = EXCLUDED."foreign",
-                                investment_trust = EXCLUDED.investment_trust,
-                                dealer = EXCLUDED.dealer,
-                                sum_holding_rate = EXCLUDED.sum_holding_rate,
-                                foreign_holding_rate = EXCLUDED.foreign_holding_rate,
-                                investment_trust_holding_rate = EXCLUDED.investment_trust_holding_rate,
-                                dealer_holding_rate = EXCLUDED.dealer_holding_rate
+                            ON CONFLICT (stock_id, date) DO NOTHING
                         """
                         ),
                         inst_records,
@@ -536,11 +517,7 @@ class DatabaseManager:
                             INSERT INTO major_investors
                             (id, stock_id, date, major_investors, agent_diff, skp5, skp20)
                             VALUES (:id, :stock_id, :date, :major_investors, :agent_diff, :skp5, :skp20)
-                            ON CONFLICT (stock_id, date) DO UPDATE SET
-                                major_investors = EXCLUDED.major_investors,
-                                agent_diff = EXCLUDED.agent_diff,
-                                skp5 = EXCLUDED.skp5,
-                                skp20 = EXCLUDED.skp20
+                            ON CONFLICT (stock_id, date) DO NOTHING
                         """
                         ),
                         major_records,
@@ -554,10 +531,7 @@ class DatabaseManager:
                             INSERT INTO margin_trading
                             (id, stock_id, date, lending_balance, borrowing_balance, balance_limit)
                             VALUES (:id, :stock_id, :date, :lending_balance, :borrowing_balance, :balance_limit)
-                            ON CONFLICT (stock_id, date) DO UPDATE SET
-                                lending_balance = EXCLUDED.lending_balance,
-                                borrowing_balance = EXCLUDED.borrowing_balance,
-                                balance_limit = EXCLUDED.balance_limit
+                            ON CONFLICT (stock_id, date) DO NOTHING
                         """
                         ),
                         margin_records,
@@ -615,7 +589,7 @@ class DatabaseManager:
                         }
                     )
 
-                # 批次 INSERT（使用 ON CONFLICT DO UPDATE）
+                # 批次 INSERT（使用 ON CONFLICT DO NOTHING，有資料就忽略）
                 if concentration_records:
                     await session.execute(
                         text(
@@ -632,16 +606,7 @@ class DatabaseManager:
                                 :rate_of_foreign_holding, :rate_of_ing_holding,
                                 :rate_of_dealer_holding
                             )
-                            ON CONFLICT (stock_id, date)
-                            DO UPDATE SET
-                                more_than_400 = EXCLUDED.more_than_400,
-                                more_than_1000 = EXCLUDED.more_than_1000,
-                                less_than_20 = EXCLUDED.less_than_20,
-                                "close" = EXCLUDED."close",
-                                director_ratio = EXCLUDED.director_ratio,
-                                rate_of_foreign_holding = EXCLUDED.rate_of_foreign_holding,
-                                rate_of_ing_holding = EXCLUDED.rate_of_ing_holding,
-                                rate_of_dealer_holding = EXCLUDED.rate_of_dealer_holding
+                            ON CONFLICT (stock_id, date) DO NOTHING
                         """
                         ),
                         concentration_records,
@@ -676,13 +641,7 @@ class DatabaseManager:
                     INSERT INTO stock_list
                     (stock_id, name, type, country, market, is_active, updated_at)
                     VALUES (:stock_id, :name, :type, :country, :market, :is_active, :updated_at)
-                    ON CONFLICT (stock_id) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        type = EXCLUDED.type,
-                        country = EXCLUDED.country,
-                        market = EXCLUDED.market,
-                        is_active = EXCLUDED.is_active,
-                        updated_at = EXCLUDED.updated_at
+                    ON CONFLICT (stock_id) DO NOTHING
                 """
                 ),
                 stock_records,
