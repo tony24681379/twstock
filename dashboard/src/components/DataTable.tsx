@@ -32,7 +32,6 @@ export function DataTable<T>({
   keyExtractor,
   emptyMessage = '無資料',
   className = '',
-  darkMode = false,
 }: DataTableProps<T>) {
   if (data.length === 0) {
     return (

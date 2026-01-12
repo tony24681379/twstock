@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.config import ALLOWED_ORIGINS, API_DESCRIPTION, API_TITLE, API_VERSION
-from api.routers import stocks
+from api.routers import cache, stocks
 from twstock.database import DatabaseManager
 
 # 設定日誌
@@ -96,6 +96,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # 註冊路由
 app.include_router(stocks.router)
+app.include_router(cache.router)  # 🆕 快取管理 API
 
 
 @app.get("/")

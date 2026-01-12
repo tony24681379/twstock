@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 
 interface Weights {
   chip: number
-  technical: number
   fundamental: number
 }
 
@@ -17,12 +16,22 @@ export function WeightController({ onChange, className = '' }: Props) {
     const saved = localStorage.getItem('strengthWeights')
     if (saved) {
       try {
-        return JSON.parse(saved)
+        const parsed = JSON.parse(saved)
+        // 檢查是否為新格式（只有 chip 和 fundamental），且總和為 1.0
+        if (parsed.chip !== undefined && parsed.fundamental !== undefined && !parsed.technical) {
+          const sum = parsed.chip + parsed.fundamental
+          if (Math.abs(sum - 1.0) < 0.01) {
+            return parsed
+          }
+        }
       } catch {
         // fallback to default
       }
     }
-    return { chip: 0.5, technical: 0.3, fundamental: 0.2 }
+    // 使用預設值並儲存到 localStorage
+    const defaultWeights = { chip: 0.5, fundamental: 0.5 }
+    localStorage.setItem('strengthWeights', JSON.stringify(defaultWeights))
+    return defaultWeights
   })()
 
   // 本地權重狀態（拖動時即時更新）
@@ -34,7 +43,6 @@ export function WeightController({ onChange, className = '' }: Props) {
   // 檢查是否有未套用的變更
   const hasChanges =
     weights.chip !== appliedWeights.chip ||
-    weights.technical !== appliedWeights.technical ||
     weights.fundamental !== appliedWeights.fundamental
 
   // 首次載入時通知父元件
@@ -43,29 +51,14 @@ export function WeightController({ onChange, className = '' }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 調整單個權重，自動調整其他兩個以維持總和 = 1.0
+  // 調整單個權重，自動調整另一個以維持總和 = 1.0
   const handleChange = (type: keyof Weights, value: number) => {
     const newWeights = { ...weights }
     newWeights[type] = value
 
-    // 找出其他兩個權重類型
-    const others = (Object.keys(newWeights) as (keyof Weights)[])
-      .filter(k => k !== type)
-
-    // 計算剩餘權重
-    const remaining = 1.0 - value
-
-    // 按比例分配剩餘權重
-    const currentOthersSum = weights[others[0]] + weights[others[1]]
-    if (currentOthersSum > 0) {
-      const ratio = remaining / currentOthersSum
-      newWeights[others[0]] = weights[others[0]] * ratio
-      newWeights[others[1]] = weights[others[1]] * ratio
-    } else {
-      // 均分
-      newWeights[others[0]] = remaining / 2
-      newWeights[others[1]] = remaining / 2
-    }
+    // 另一個權重自動調整
+    const other: keyof Weights = type === 'chip' ? 'fundamental' : 'chip'
+    newWeights[other] = 1.0 - value
 
     setWeights(newWeights)
   }
@@ -109,26 +102,6 @@ export function WeightController({ onChange, className = '' }: Props) {
           />
         </div>
 
-        {/* 技術權重 */}
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">
-              技術
-            </label>
-            <span className="text-xs font-mono text-gray-700 dark:text-gray-300">
-              {(weights.technical * 100).toFixed(0)}%
-            </span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={weights.technical * 100}
-            onChange={(e) => handleChange('technical', Number(e.target.value) / 100)}
-            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-600"
-          />
-        </div>
-
         {/* 基本面權重 */}
         <div>
           <div className="flex justify-between items-center mb-1">
@@ -155,7 +128,7 @@ export function WeightController({ onChange, className = '' }: Props) {
         <div className="flex justify-between items-center text-xs mb-3">
           <span className="text-gray-500 dark:text-gray-400">總和</span>
           <span className="font-mono text-gray-700 dark:text-gray-300">
-            {((weights.chip + weights.technical + weights.fundamental) * 100).toFixed(0)}%
+            {((weights.chip + weights.fundamental) * 100).toFixed(0)}%
           </span>
         </div>
 

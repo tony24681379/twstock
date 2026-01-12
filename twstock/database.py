@@ -159,6 +159,27 @@ class StockEPS(Base):
     )
 
 
+class StockMonthlyRevenue(Base):
+    """股票月營收資料表"""
+
+    __tablename__ = "stock_monthly_revenue"
+
+    stock_id = Column(String, primary_key=True, index=True, comment="股票代號")
+    year = Column(Integer, primary_key=True, comment="年份")
+    month = Column(Integer, primary_key=True, comment="月份 (1-12)")
+    revenue = Column(Float, comment="月營收（千元）")
+    mom_change = Column(Float, comment="月增率 (MoM %)")
+    yoy_change = Column(Float, comment="年增率 (YoY %)")
+    cumulative_revenue = Column(Float, comment="累計營收（千元）")
+    cumulative_yoy_change = Column(Float, comment="累計年增率 (%)")
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_revenue_stock", "stock_id"),
+        Index("idx_revenue_year_month", "year", "month"),
+    )
+
+
 class StockList(Base):
     """股票清單"""
 
@@ -613,6 +634,184 @@ class DatabaseManager:
                     )
                     await session.commit()
 
+    async def save_monthly_revenue(self, stock_id: str, revenue_df: pd.DataFrame):
+        """
+        儲存股票月營收資料到資料庫
+
+        Args:
+            stock_id: 股票代碼
+            revenue_df: 月營收 DataFrame，欄位包含：
+                       - year: 年份
+                       - month: 月份
+                       - revenue: 月營收（千元）
+                       - mom_change: 月增率 (%)
+                       - yoy_change: 年增率 (%)
+                       - cumulative_revenue: 累計營收（千元）
+                       - cumulative_yoy_change: 累計年增率 (%)
+
+        說明：
+            - 使用 ON CONFLICT DO NOTHING 實現忽略語意
+            - 主鍵衝突時不更新（保留舊資料）
+            - 批次插入所有記錄（效能優化）
+        """
+        stock_id = stock_id.lower()  # 統一使用小寫 ID
+        if revenue_df.empty:
+            return
+
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                # 轉換 DataFrame 為字典列表
+                records = []
+                for _, row in revenue_df.iterrows():
+                    records.append(
+                        {
+                            "stock_id": stock_id,
+                            "year": int(row["year"]),
+                            "month": int(row["month"]),
+                            "revenue": (
+                                float(row["revenue"])
+                                if pd.notna(row["revenue"])
+                                else None
+                            ),
+                            "mom_change": (
+                                float(row["mom_change"])
+                                if pd.notna(row["mom_change"])
+                                else None
+                            ),
+                            "yoy_change": (
+                                float(row["yoy_change"])
+                                if pd.notna(row["yoy_change"])
+                                else None
+                            ),
+                            "cumulative_revenue": (
+                                float(row["cumulative_revenue"])
+                                if pd.notna(row["cumulative_revenue"])
+                                else None
+                            ),
+                            "cumulative_yoy_change": (
+                                float(row["cumulative_yoy_change"])
+                                if pd.notna(row["cumulative_yoy_change"])
+                                else None
+                            ),
+                            "updated_at": datetime.now(),
+                        }
+                    )
+
+                # 批次 INSERT ON CONFLICT DO NOTHING（有資料就忽略）
+                if records:
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO stock_monthly_revenue (
+                                stock_id, year, month, revenue, mom_change, yoy_change,
+                                cumulative_revenue, cumulative_yoy_change, updated_at
+                            )
+                            VALUES (
+                                :stock_id, :year, :month, :revenue, :mom_change, :yoy_change,
+                                :cumulative_revenue, :cumulative_yoy_change, :updated_at
+                            )
+                            ON CONFLICT (stock_id, year, month) DO NOTHING
+                        """
+                        ),
+                        records,
+                    )
+                    await session.commit()
+
+    async def bulk_load_monthly_revenue(
+        self, stock_ids: List[str], months: int = 12
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        批次載入多支股票的月營收資料（單一 SQL 查詢）
+
+        Args:
+            stock_ids: 股票代碼列表
+            months: 每支股票載入最近幾個月（預設 12 個月）
+
+        Returns:
+            Dict[stock_id, DataFrame]: 每支股票的月營收 DataFrame
+
+        說明：
+            - 使用 Window Function 限制每股最多 N 個月
+            - 單一 SQL 查詢載入所有股票（避免 N+1 問題）
+            - 按年月排序（最新在前）
+        """
+        if not stock_ids:
+            return {}
+
+        # 統一使用小寫 ID
+        stock_ids_lower = [sid.lower() for sid in stock_ids]
+
+        async with self.get_session() as session:
+            # SQL 查詢：使用 ROW_NUMBER() 限制每股最多 N 個月
+            query = text(
+                """
+                WITH ranked_revenue AS (
+                    SELECT
+                        stock_id,
+                        year,
+                        month,
+                        revenue,
+                        mom_change,
+                        yoy_change,
+                        cumulative_revenue,
+                        cumulative_yoy_change,
+                        updated_at,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY stock_id
+                            ORDER BY year DESC, month DESC
+                        ) AS rn
+                    FROM stock_monthly_revenue
+                    WHERE stock_id = ANY(:stock_ids)
+                )
+                SELECT
+                    stock_id,
+                    year,
+                    month,
+                    revenue,
+                    mom_change,
+                    yoy_change,
+                    cumulative_revenue,
+                    cumulative_yoy_change,
+                    updated_at
+                FROM ranked_revenue
+                WHERE rn <= :months
+                ORDER BY stock_id, year DESC, month DESC
+            """
+            )
+
+            result = await session.execute(
+                query, {"stock_ids": stock_ids_lower, "months": months}
+            )
+            rows = result.fetchall()
+
+            # 轉換為 Dict[stock_id, DataFrame]
+            revenue_dict = {}
+            for row in rows:
+                stock_id_value = row.stock_id
+                if stock_id_value not in revenue_dict:
+                    revenue_dict[stock_id_value] = []
+
+                revenue_dict[stock_id_value].append(
+                    {
+                        "year": row.year,
+                        "month": row.month,
+                        "revenue": row.revenue,
+                        "mom_change": row.mom_change,
+                        "yoy_change": row.yoy_change,
+                        "cumulative_revenue": row.cumulative_revenue,
+                        "cumulative_yoy_change": row.cumulative_yoy_change,
+                        "updated_at": row.updated_at,
+                    }
+                )
+
+            # 轉換為 DataFrame
+            for stock_id_value in revenue_dict:
+                revenue_dict[stock_id_value] = pd.DataFrame(
+                    revenue_dict[stock_id_value]
+                )
+
+            return revenue_dict
+
     async def save_stock_list(self, stocks: List[Dict[str, Any]]):
         """儲存股票清單（使用批次 SQL INSERT）"""
         if not stocks:
@@ -770,7 +969,7 @@ class DatabaseManager:
     async def bulk_load_daily_data(
         self, stock_ids: List[str], days: int = 490
     ) -> Dict[str, pd.DataFrame]:
-        """批次載入多支股票的每日資料（僅 OHLCV，不含機構數據）
+        """批次載入多支股票的每日資料（包含機構數據）
 
         Args:
             stock_ids: 股票代碼列表
@@ -778,27 +977,47 @@ class DatabaseManager:
 
         Returns:
             Dict[stock_id, DataFrame]: 每支股票的 DataFrame
-            DataFrame columns: [date, open, high, low, close, volume]
+            DataFrame columns: [date, open, high, low, close, volume, foreign, ...]
         """
         stock_ids = [sid.lower() for sid in stock_ids]
 
         async with self.get_session() as session:
-            # 優化：只查詢 stock_daily 表，不做 JOIN（技術指標只需要 OHLCV）
+            # 🔧 修復：加入 LEFT JOIN 載入機構數據（技術指標計算需要）
             result = await session.execute(
                 text(
                     f"""
                     SELECT
-                        stock_id,
-                        date,
-                        open,
-                        high,
-                        low,
-                        close,
-                        volume
-                    FROM stock_daily
-                    WHERE stock_id = ANY(:stock_ids)
-                    AND date >= CURRENT_DATE - INTERVAL '{days} days'
-                    ORDER BY stock_id, date DESC
+                        d.stock_id,
+                        d.date,
+                        d.open,
+                        d.high,
+                        d.low,
+                        d.close,
+                        d.volume,
+                        COALESCE(i.foreign, 0) as foreign,
+                        COALESCE(i.investment_trust, 0) as investment_trust,
+                        COALESCE(i.dealer, 0) as dealer,
+                        COALESCE(i.foreign_holding_rate, 0) as foreign_holding_rate,
+                        COALESCE(i.investment_trust_holding_rate, 0) as investment_trust_holding_rate,
+                        COALESCE(i.dealer_holding_rate, 0) as dealer_holding_rate,
+                        COALESCE(i.sum_holding_rate, 0) as sum_holding_rate,
+                        COALESCE(m.major_investors, 0) as major_investors,
+                        COALESCE(m.agent_diff, 0) as agent_diff,
+                        COALESCE(m.skp5, 0) as skp5,
+                        COALESCE(m.skp20, 0) as skp20,
+                        COALESCE(mt.lending_balance, 0) as lending_balance,
+                        COALESCE(mt.borrowing_balance, 0) as borrowing_balance,
+                        COALESCE(mt.balance_limit, 0) as balance_limit
+                    FROM stock_daily d
+                    LEFT JOIN institutional_investors i
+                        ON d.stock_id = i.stock_id AND d.date = i.date
+                    LEFT JOIN major_investors m
+                        ON d.stock_id = m.stock_id AND d.date = m.date
+                    LEFT JOIN margin_trading mt
+                        ON d.stock_id = mt.stock_id AND d.date = mt.date
+                    WHERE d.stock_id = ANY(:stock_ids)
+                    AND d.date >= CURRENT_DATE - INTERVAL '{days} days'
+                    ORDER BY d.stock_id, d.date DESC
                 """
                 ),
                 {"stock_ids": stock_ids},
@@ -819,6 +1038,20 @@ class DatabaseManager:
                         "low": row.low,
                         "close": row.close,
                         "volume": row.volume,
+                        "foreign": row.foreign,
+                        "investment_trust": row.investment_trust,
+                        "dealer": row.dealer,
+                        "foreign_holding_rate": row.foreign_holding_rate,
+                        "investment_trust_holding_rate": row.investment_trust_holding_rate,
+                        "dealer_holding_rate": row.dealer_holding_rate,
+                        "sum_holding_rate": row.sum_holding_rate,
+                        "major_investors": row.major_investors,
+                        "agent_diff": row.agent_diff,
+                        "skp5": row.skp5,
+                        "skp20": row.skp20,
+                        "lending_balance": row.lending_balance,
+                        "borrowing_balance": row.borrowing_balance,
+                        "balance_limit": row.balance_limit,
                     }
                 )
 

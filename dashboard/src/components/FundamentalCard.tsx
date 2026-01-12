@@ -1,13 +1,13 @@
 import { useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import type { FundamentalInfo, ChipSignal, EPSDetail, CapitalInfo, HoldingInfo } from '../types/stock'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ComposedChart, Bar } from 'recharts'
+import type { FundamentalInfo } from '../types/stock'
 
 interface Props {
   info: FundamentalInfo
   className?: string
 }
 
-type TabType = 'earning' | 'valuation' | 'holding' | 'capital' | 'signals'
+type TabType = 'earning' | 'revenue' | 'valuation' | 'holding' | 'capital' | 'signals'
 
 export function FundamentalCard({ info, className = '' }: Props) {
   const [activeTab, setActiveTab] = useState<TabType>('earning')
@@ -15,6 +15,7 @@ export function FundamentalCard({ info, className = '' }: Props) {
   // Tab 配置
   const tabs = [
     { id: 'earning' as TabType, label: '獲利能力', icon: '📊' },
+    { id: 'revenue' as TabType, label: '營收成長', icon: '📈' },
     { id: 'valuation' as TabType, label: '估值指標', icon: '💰' },
     { id: 'holding' as TabType, label: '持股結構', icon: '👥' },
     { id: 'capital' as TabType, label: '股本結構', icon: '🏦' },
@@ -77,6 +78,7 @@ export function FundamentalCard({ info, className = '' }: Props) {
       {/* Tab 內容區域 */}
       <div className="p-6">
         {activeTab === 'earning' && <EarningTab info={info} />}
+        {activeTab === 'revenue' && <RevenueTab info={info} />}
         {activeTab === 'valuation' && <ValuationTab info={info} />}
         {activeTab === 'holding' && <HoldingTab info={info} />}
         {activeTab === 'capital' && <CapitalTab info={info} />}
@@ -206,7 +208,191 @@ function EarningTab({ info }: { info: FundamentalInfo }) {
 }
 
 // ============================================================
-// Tab 2: 估值指標 - 4 個指標卡片
+// Tab 2: 營收成長 - 月營收趨勢圖 + 統計 + 詳細表格
+// ============================================================
+function RevenueTab({ info }: { info: FundamentalInfo }) {
+  // 檢查是否有營收資料
+  if (!info.revenue_details || info.revenue_details.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <div className="text-gray-500 dark:text-gray-400 text-sm">
+          暫無月營收資料
+        </div>
+      </div>
+    )
+  }
+
+  // 準備圖表資料（反轉：最舊→最新）
+  const revenueChartData = info.revenue_details.map(detail => ({
+    label: `${detail.year}/${detail.month.toString().padStart(2, '0')}`,
+    revenue: (detail.revenue / 1000000).toFixed(0), // 轉換為百萬
+    yoy_change: detail.yoy_change,
+  })).reverse()
+
+  // 計算顏色類別
+  const getChangeColorClass = (value: number | null) => {
+    if (value === null) return 'text-gray-900 dark:text-gray-100'
+    if (value > 0) return 'text-green-600 dark:text-green-400'
+    if (value < 0) return 'text-red-600 dark:text-red-400'
+    return 'text-gray-900 dark:text-gray-100'
+  }
+
+  // 最新月營收（百萬）
+  const latestRevenue = info.revenue_details[0]
+    ? (info.revenue_details[0].revenue / 1000000).toFixed(0)
+    : 'N/A'
+
+  return (
+    <div className="space-y-6">
+      {/* 月營收趨勢圖 */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+          最近 12 個月營收趨勢
+        </h3>
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={revenueChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#4B5563" />
+              <XAxis
+                dataKey="label"
+                tick={{ fill: '#9CA3AF', fontSize: 11 }}
+                angle={-45}
+                textAnchor="end"
+                height={70}
+              />
+              <YAxis
+                yAxisId="left"
+                tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                label={{ value: '營收（百萬）', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tick={{ fill: '#9CA3AF', fontSize: 12 }}
+                label={{ value: '年增率（%）', angle: 90, position: 'insideRight', fill: '#9CA3AF' }}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#1F2937',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  color: '#F3F4F6'
+                }}
+              />
+              <Bar yAxisId="left" dataKey="revenue" fill="#3B82F6" name="月營收（百萬）" />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="yoy_change"
+                stroke="#10B981"
+                strokeWidth={2}
+                dot={{ fill: '#10B981', r: 3 }}
+                name="年增率（%）"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* 統計指標 */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+          統計指標
+        </h3>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">趨勢</div>
+            <div className="text-base font-semibold text-gray-900 dark:text-white">
+              {info.revenue_trend || '持平'}
+            </div>
+          </div>
+          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">平均年增率</div>
+            <div className={`text-base font-semibold ${getChangeColorClass(info.revenue_yoy_avg || 0)}`}>
+              {info.revenue_yoy_avg ? `${info.revenue_yoy_avg.toFixed(2)}%` : 'N/A'}
+            </div>
+          </div>
+          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3">
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">最新月營收</div>
+            <div className="text-base font-semibold text-gray-900 dark:text-white">
+              {latestRevenue} 百萬
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 月營收詳細表格 */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+          月營收明細
+        </h3>
+        <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className="overflow-y-auto max-h-96">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    年月
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    月營收<br />(百萬)
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    月增率<br />(%)
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    年增率<br />(%)
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    累計營收<br />(百萬)
+                  </th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    累計年增率<br />(%)
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {info.revenue_details.map((detail, idx) => (
+                  <tr key={idx}>
+                    <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                      {detail.year}/{detail.month.toString().padStart(2, '0')}
+                    </td>
+                    <td className="px-3 py-2 text-sm text-right font-mono text-gray-900 dark:text-gray-100">
+                      {(detail.revenue / 1000000).toFixed(0)}
+                    </td>
+                    <td className={`px-3 py-2 text-sm text-right font-mono ${getChangeColorClass(detail.mom_change)}`}>
+                      {detail.mom_change !== null
+                        ? `${detail.mom_change > 0 ? '+' : ''}${detail.mom_change.toFixed(2)}`
+                        : '-'}
+                    </td>
+                    <td className={`px-3 py-2 text-sm text-right font-mono ${getChangeColorClass(detail.yoy_change)}`}>
+                      {detail.yoy_change !== null
+                        ? `${detail.yoy_change > 0 ? '+' : ''}${detail.yoy_change.toFixed(2)}`
+                        : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-sm text-right font-mono text-gray-900 dark:text-gray-100">
+                      {detail.cumulative_revenue !== null
+                        ? (detail.cumulative_revenue / 1000000).toFixed(0)
+                        : '-'}
+                    </td>
+                    <td className={`px-3 py-2 text-sm text-right font-mono ${getChangeColorClass(detail.cumulative_yoy_change)}`}>
+                      {detail.cumulative_yoy_change !== null
+                        ? `${detail.cumulative_yoy_change > 0 ? '+' : ''}${detail.cumulative_yoy_change.toFixed(2)}`
+                        : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// Tab 3: 估值指標 - 4 個指標卡片
 // ============================================================
 function ValuationTab({ info }: { info: FundamentalInfo }) {
   return (

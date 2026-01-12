@@ -29,27 +29,25 @@ async def list_stocks(
     order: str = Query("desc", description="排序方向 (asc/desc)"),
     limit: int = Query(DEFAULT_PAGE_SIZE, le=MAX_PAGE_SIZE, description="每頁筆數"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    # 新增：自訂權重參數
+    # 自訂權重參數（籌碼 + 基本面）
     chip_weight: float = Query(0.5, ge=0, le=1, description="籌碼權重"),
-    tech_weight: float = Query(0.3, ge=0, le=1, description="技術權重"),
-    fund_weight: float = Query(0.2, ge=0, le=1, description="基本面權重"),
+    fund_weight: float = Query(0.5, ge=0, le=1, description="基本面權重"),
     session: AsyncSession = Depends(get_db_session),
 ):
     """
     取得股票列表（支援自訂權重）
 
-    - **sort_by**: 排序欄位（stock_id, chip_strength, technical_strength, fundamental_strength, overall_strength, expected_return, win_rate, signal_count）
+    - **sort_by**: 排序欄位（stock_id, chip_strength, fundamental_strength, overall_strength, expected_return, win_rate, signal_count）
     - **order**: 排序方向（asc, desc）
     - **limit**: 每頁筆數（最大 500）
     - **offset**: 偏移量
     - **chip_weight**: 籌碼權重（0-1，預設 0.5）
-    - **tech_weight**: 技術權重（0-1，預設 0.3）
-    - **fund_weight**: 基本面權重（0-1，預設 0.2）
+    - **fund_weight**: 基本面權重（0-1，預設 0.5）
 
-    三種權重總和必須為 1.0
+    兩種權重總和必須為 1.0
     """
     # 驗證權重總和
-    total = chip_weight + tech_weight + fund_weight
+    total = chip_weight + fund_weight
     if abs(total - 1.0) > 0.01:
         raise HTTPException(
             status_code=400,
@@ -60,8 +58,7 @@ async def list_stocks(
     allowed_sort_fields = [
         "stock_id",
         "chip_strength",
-        "technical_strength",
-        "fundamental_strength",  # 新增
+        "fundamental_strength",
         "overall_strength",
         "signal_strength",  # 向後相容
         "expected_return",
@@ -80,7 +77,7 @@ async def list_stocks(
     try:
         items, pagination = await StockService.get_stock_list(
             session, sort_by, order, limit, offset,
-            chip_weight, tech_weight, fund_weight  # 傳遞權重
+            chip_weight, fund_weight  # 傳遞權重（籌碼 + 基本面）
         )
 
         # 設定快取標頭（資料每小時更新一次）

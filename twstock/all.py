@@ -255,6 +255,61 @@ class All:
             print(f"\n   ✓ API 更新完成！成功: {updated_count} 失敗: {failed_count}")
             print(f"   耗時: {int(update_elapsed/60)}分{int(update_elapsed%60)}秒")
 
+        # 步驟3.5: 批次更新月營收資料
+        print(f"\n📈 批次更新所有股票的月營收資料...")
+        revenue_start_time = time.time()
+
+        MAX_REVENUE_WORKERS = int(os.getenv("MAX_API_WORKERS", "10"))
+        revenue_semaphore = asyncio.Semaphore(MAX_REVENUE_WORKERS)
+
+        async def update_monthly_revenue(sid):
+            """更新單支股票的月營收資料"""
+            async with revenue_semaphore:
+                try:
+                    if hasattr(self.fetcher, "fetch_monthly_revenue"):
+                        await self.fetcher.fetch_monthly_revenue(
+                            sid, months=12, save_to_db=True
+                        )
+                        return sid, True
+                    else:
+                        return sid, False
+                except Exception as e:
+                    # 忽略錯誤，某些股票可能沒有月營收資料
+                    return sid, False
+
+        # 創建月營收更新任務（所有股票）
+        revenue_tasks = [update_monthly_revenue(sid) for sid in all_stock_ids]
+
+        print(f"   並發更新數: {MAX_REVENUE_WORKERS}")
+
+        revenue_updated_count = 0
+        revenue_failed_count = 0
+
+        for task in asyncio.as_completed(revenue_tasks):
+            sid, success = await task
+            if success:
+                revenue_updated_count += 1
+            else:
+                revenue_failed_count += 1
+
+            # 進度顯示
+            if revenue_updated_count % 50 == 0:
+                elapsed = time.time() - revenue_start_time
+                speed = revenue_updated_count / elapsed if elapsed > 0 else 0
+                remaining = total_stocks - revenue_updated_count - revenue_failed_count
+                eta = remaining / speed if speed > 0 else 0
+                print(
+                    f"   月營收更新進度: [{revenue_updated_count + revenue_failed_count}/{total_stocks}] "
+                    f"成功: {revenue_updated_count} - "
+                    f"速度: {speed:.2f} 支/秒 - 預估剩餘: {int(eta/60)}分{int(eta%60)}秒"
+                )
+
+        revenue_elapsed = time.time() - revenue_start_time
+        print(
+            f"\n   ✓ 月營收更新完成！成功: {revenue_updated_count} 跳過: {revenue_failed_count}"
+        )
+        print(f"   耗時: {int(revenue_elapsed/60)}分{int(revenue_elapsed%60)}秒")
+
         # 步驟4: 批次載入所有股票資料（包含剛更新的）
         print(f"\n📥 批次載入所有股票資料...")
         bulk_daily_data = {}
@@ -264,7 +319,7 @@ class All:
             print(f"   載入 {len(all_stock_ids)} 支股票的資料...")
             # 使用批次 SQL 查詢（只查詢一次！）
             bulk_daily_data = await self.fetcher.db_manager.bulk_load_daily_data(
-                all_stock_ids, days=90  # 優化：只載入 90 天數據（足夠計算所有技術指標）
+                all_stock_ids, days=200  # 200 日曆日 ≈ 137 交易日，dropna 後 78 行，緩衝 18 行
             )
             bulk_info_data = await self.fetcher.db_manager.bulk_load_stock_info(
                 all_stock_ids

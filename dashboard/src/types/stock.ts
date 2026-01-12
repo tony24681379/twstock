@@ -10,11 +10,10 @@ export interface StockListItem {
   name: string
   close_price: number
 
-  // 三種強度（包含基本面）
-  chip_strength: number
-  technical_strength: number
-  fundamental_strength: number // 新增：基本面強度
-  overall_strength: number
+  // 兩種強度（籌碼 + 基本面）- 原始分數（可為負數）
+  chip_strength: number        // -25 to +89（原始分數）
+  fundamental_strength: number // -73 to +93（原始分數）
+  overall_strength: number     // 0-100（標準化分數）
 
   signal_count: number
   expected_return: number
@@ -22,14 +21,12 @@ export interface StockListItem {
   risk_level: string
 
   // 訊號列表
-  chip_signals: ChipSignal[] // 新增：籌碼訊號
-  technical_signals: ChipSignal[] // 新增：技術訊號
-  fundamental_signals?: ChipSignal[] // 新增：基本面訊號（optional）
+  chip_signals: ChipSignal[]
+  fundamental_signals?: ChipSignal[] // 基本面訊號（optional）
 
   // 權重配置（optional）
   weights?: {
     chip: number
-    technical: number
     fundamental: number
   }
 
@@ -86,8 +83,7 @@ export interface StockDetail {
 
   // 訊號列表
   chip_signals: ChipSignal[]
-  technical_signals: ChipSignal[]
-  fundamental_signals?: ChipSignal[] // 新增：基本面訊號（optional）
+  fundamental_signals?: ChipSignal[] // 基本面訊號（optional）
 
   expected_return: number
   win_rate: number
@@ -137,6 +133,17 @@ export interface HoldingInfo {
   latest_date: string | null                       // 最新資料日期
 }
 
+// 🆕 月營收詳細資料
+export interface MonthlyRevenueDetail {
+  year: number                          // 年份
+  month: number                         // 月份 (1-12)
+  revenue: number                       // 月營收（千元）
+  mom_change: number | null             // 月增率 (%)
+  yoy_change: number | null             // 年增率 (%)
+  cumulative_revenue: number | null     // 累計營收（千元）
+  cumulative_yoy_change: number | null  // 累計年增率 (%)
+}
+
 // 基本面詳細資訊介面（詳細頁專用）
 export interface FundamentalInfo {
   // 獲利能力
@@ -153,10 +160,16 @@ export interface FundamentalInfo {
 
   // 訊號
   fundamental_signals: ChipSignal[]
-  fundamental_strength: number   // 0-100 分數
+  fundamental_strength: number   // -73 to +93（原始分數）
+
+  // 🆕 營收成長
+  revenue_recent_12m?: number[]        // 最近12個月營收（千元）
+  revenue_yoy_avg?: number             // 平均年增率 (%)
+  revenue_trend?: string               // 營收趨勢（上升/下降/持平）
 
   // 🆕 詳細數據（Tabs 架構用）
-  eps_details?: EPSDetail[]           // 逐季 EPS 詳細資料
-  capital_info?: CapitalInfo          // 股本資訊
-  holding_info?: HoldingInfo          // 持股結構
+  eps_details?: EPSDetail[]             // 逐季 EPS 詳細資料
+  capital_info?: CapitalInfo            // 股本資訊
+  holding_info?: HoldingInfo            // 持股結構
+  revenue_details?: MonthlyRevenueDetail[]  // 月營收詳細資料
 }

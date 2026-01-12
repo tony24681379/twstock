@@ -22,15 +22,14 @@ class StockListItem(BaseModel):
     name: str = Field(..., description="股票名稱")
     close_price: float = Field(..., description="收盤價")
 
-    # 三種強度（更新：新增基本面強度）
-    chip_strength: int = Field(..., ge=0, le=100, description="籌碼強度 (0-100)")
-    technical_strength: int = Field(..., ge=0, le=100, description="技術強度 (0-100)")
-    fundamental_strength: int = Field(..., ge=0, le=100, description="基本面強度 (0-100)")
+    # 兩種強度（籌碼 + 基本面）
+    chip_strength: int = Field(..., ge=-25, le=89, description="籌碼強度（原始分數）")
+    fundamental_strength: int = Field(..., ge=-73, le=93, description="基本面強度（原始分數）")
     overall_strength: int = Field(..., ge=0, le=100, description="綜合強度 (0-100)")
 
-    # 權重資訊（新增）
+    # 權重資訊
     weights: Dict[str, float] = Field(
-        default={"chip": 0.5, "technical": 0.3, "fundamental": 0.2},
+        default={"chip": 0.5, "fundamental": 0.5},
         description="計算 overall_strength 使用的權重"
     )
 
@@ -39,11 +38,8 @@ class StockListItem(BaseModel):
     win_rate: float = Field(..., description="歷史勝率 (%)")
     risk_level: str = Field(..., description="風險等級")
 
-    # 訊號列表（更新：新增基本面訊號）
+    # 訊號列表
     chip_signals: List[ChipSignal] = Field(default_factory=list, description="籌碼訊號")
-    technical_signals: List[ChipSignal] = Field(
-        default_factory=list, description="技術訊號"
-    )
     fundamental_signals: List[ChipSignal] = Field(
         default_factory=list, description="基本面訊號"
     )
@@ -65,9 +61,9 @@ class StockListItem(BaseModel):
                 "stock_id": "2330",
                 "name": "台積電",
                 "close_price": 580.0,
-                "chip_strength": 85,
-                "technical_strength": 72,
-                "fundamental_strength": 65,
+                "chip_strength": 32,
+                "technical_strength": 25,
+                "fundamental_strength": 45,
                 "overall_strength": 78,
                 "weights": {"chip": 0.5, "technical": 0.3, "fundamental": 0.2},
                 "signal_strength": 78,
@@ -199,6 +195,21 @@ class HoldingInfo(BaseModel):
         from_attributes = True
 
 
+class MonthlyRevenueDetail(BaseModel):
+    """月營收詳細資料"""
+
+    year: int = Field(..., description="年份")
+    month: int = Field(..., ge=1, le=12, description="月份 (1-12)")
+    revenue: float = Field(..., description="月營收（千元）")
+    mom_change: Optional[float] = Field(None, description="月增率 (%)")
+    yoy_change: Optional[float] = Field(None, description="年增率 (%)")
+    cumulative_revenue: Optional[float] = Field(None, description="累計營收（千元）")
+    cumulative_yoy_change: Optional[float] = Field(None, description="累計年增率 (%)")
+
+    class Config:
+        from_attributes = True
+
+
 class FundamentalInfo(BaseModel):
     """基本面資訊（詳細頁專用）"""
 
@@ -218,7 +229,14 @@ class FundamentalInfo(BaseModel):
     fundamental_signals: List[ChipSignal] = Field(
         default_factory=list, description="基本面訊號"
     )
-    fundamental_strength: int = Field(..., ge=0, le=100, description="基本面強度評分")
+    fundamental_strength: int = Field(..., ge=-73, le=93, description="基本面強度評分（原始分數）")
+
+    # 🆕 營收成長（新增）
+    revenue_recent_12m: List[float] = Field(
+        default_factory=list, description="最近12個月營收（千元）"
+    )
+    revenue_yoy_avg: float = Field(0.0, description="平均年增率 (%)")
+    revenue_trend: str = Field("持平", description="營收趨勢（上升/下降/持平）")
 
     # 🆕 詳細數據（Tabs 架構用）
     eps_details: List[EPSDetail] = Field(
@@ -226,6 +244,9 @@ class FundamentalInfo(BaseModel):
     )
     capital_info: Optional[CapitalInfo] = Field(None, description="股本資訊")
     holding_info: Optional[HoldingInfo] = Field(None, description="持股結構")
+    revenue_details: List[MonthlyRevenueDetail] = Field(
+        default_factory=list, description="月營收詳細資料"
+    )
 
 
 class StockDetail(BaseModel):

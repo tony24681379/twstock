@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { PAGINATION } from '../constants/apiConfig'
 import { fetchStocks } from '../lib/api'
-import { getSignalStrengthBadgeClass } from '../lib/colorUtils'
+import { getSignalStrengthBadgeClass, getRawScoreBadgeClass } from '../lib/colorUtils'
 import { WeightController } from '../components/WeightController'
+import SignalTooltip from '../components/SignalTooltip'
 import type { StockListItem } from '../types/stock'
 
 export default function HomePage() {
@@ -21,16 +22,22 @@ export default function HomePage() {
     const saved = localStorage.getItem('strengthWeights')
     if (saved) {
       try {
-        return JSON.parse(saved)
+        const parsed = JSON.parse(saved)
+        // 檢查是否為新格式（只有 chip 和 fundamental），且總和為 1.0
+        if (parsed.chip !== undefined && parsed.fundamental !== undefined && !parsed.technical) {
+          const sum = parsed.chip + parsed.fundamental
+          if (Math.abs(sum - 1.0) < 0.01) {
+            return parsed
+          }
+        }
       } catch {
         // fallback to default
       }
     }
-    return {
-      chip: 0.5,
-      technical: 0.3,
-      fundamental: 0.2
-    }
+    // 使用預設值並儲存到 localStorage
+    const defaultWeights = { chip: 0.5, fundamental: 0.5 }
+    localStorage.setItem('strengthWeights', JSON.stringify(defaultWeights))
+    return defaultWeights
   })
 
   // 同步排序狀態到 URL
@@ -45,20 +52,19 @@ export default function HomePage() {
   useEffect(() => {
     loadStocks()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortBy, order, weights.chip, weights.technical, weights.fundamental])
+  }, [sortBy, order, weights.chip, weights.fundamental])
 
   const loadStocks = async () => {
     try {
       setLoading(true)
       setError(null)
-      // 載入所有股票，傳遞權重參數
+      // 載入所有股票，傳遞權重參數（籌碼 + 基本面）
       const response = await fetchStocks({
         sortBy,
         order,
         limit: PAGINATION.LOAD_ALL_LIMIT,
         offset: 0,
         chipWeight: weights.chip,
-        techWeight: weights.technical,
         fundWeight: weights.fundamental
       })
       setStocks(response.data)
@@ -139,18 +145,12 @@ export default function HomePage() {
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   收盤價
                 </th>
-                {/* 三種強度欄位 */}
+                {/* 兩種強度欄位（籌碼 + 基本面）*/}
                 <th
                   onClick={() => handleSort('chip_strength')}
                   className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   籌碼強度{getSortIndicator('chip_strength')}
-                </th>
-                <th
-                  onClick={() => handleSort('technical_strength')}
-                  className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  技術強度{getSortIndicator('technical_strength')}
                 </th>
                 <th
                   onClick={() => handleSort('fundamental_strength')}
@@ -173,7 +173,7 @@ export default function HomePage() {
               {stocks.map((stock) => (
                 <tr
                   key={stock.stock_id}
-                  className="group hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
+                  className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
                 >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <Link
@@ -191,34 +191,45 @@ export default function HomePage() {
                   </td>
 
                   {/* 籌碼強度 */}
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.chip_strength)}`}>
-                      {stock.chip_strength}
+                  <td className="px-6 py-4 whitespace-nowrap text-center relative group">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRawScoreBadgeClass(stock.chip_strength)}`}>
+                      {stock.chip_strength > 0 ? '+' : ''}{stock.chip_strength}
                     </span>
-                  </td>
 
-                  {/* 技術強度 */}
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.technical_strength)}`}>
-                      {stock.technical_strength}
-                    </span>
+                    {/* 籌碼訊號 Tooltip */}
+                    {stock.chip_signals && stock.chip_signals.length > 0 && (
+                      <SignalTooltip
+                        title={`籌碼訊號 (${stock.chip_signals.length})`}
+                        signals={stock.chip_signals}
+                        show={true}
+                      />
+                    )}
                   </td>
 
                   {/* 基本面強度 */}
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getSignalStrengthBadgeClass(stock.fundamental_strength)}`}>
-                      {stock.fundamental_strength}
+                  <td className="px-6 py-4 whitespace-nowrap text-center relative group">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRawScoreBadgeClass(stock.fundamental_strength)}`}>
+                      {stock.fundamental_strength > 0 ? '+' : ''}{stock.fundamental_strength}
                     </span>
+
+                    {/* 基本面訊號 Tooltip */}
+                    {stock.fundamental_signals && stock.fundamental_signals.length > 0 && (
+                      <SignalTooltip
+                        title={`基本面訊號 (${stock.fundamental_signals.length})`}
+                        signals={stock.fundamental_signals}
+                        show={true}
+                      />
+                    )}
                   </td>
 
                   {/* 綜合強度（加粗 + Tooltip）*/}
-                  <td className="px-6 py-4 whitespace-nowrap text-center relative">
+                  <td className="px-6 py-4 whitespace-nowrap text-center relative group">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${getSignalStrengthBadgeClass(stock.overall_strength)}`}>
                       {stock.overall_strength}
                     </span>
 
-                    {/* Tooltip：分別顯示籌碼訊號和技術訊號 */}
-                    {((stock.chip_signals && stock.chip_signals.length > 0) || (stock.technical_signals && stock.technical_signals.length > 0)) && (
+                    {/* Tooltip：顯示籌碼訊號 */}
+                    {(stock.chip_signals && stock.chip_signals.length > 0) && (
                       <div className="hidden group-hover:block absolute top-full left-1/2 -translate-x-1/2 mt-2
                                       bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900
                                       rounded-lg px-3 py-2 text-xs shadow-xl z-50 min-w-[300px]
@@ -226,46 +237,23 @@ export default function HomePage() {
                                       before:border-4 before:border-transparent before:border-b-gray-900 dark:before:border-b-gray-100">
 
                         {/* 籌碼訊號 */}
-                        {stock.chip_signals && stock.chip_signals.length > 0 && (
-                          <div className="mb-2">
-                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
-                              籌碼訊號 ({stock.chip_signals.length}):
-                            </div>
-                            <div className="space-y-0.5">
-                              {stock.chip_signals.map((signal, idx) => (
-                                <div key={idx} className="flex justify-between gap-3">
-                                  <span className="text-left">• {signal.name}</span>
-                                  <span className={`font-semibold ${
-                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
-                                  }`}>
-                                    {signal.score > 0 ? '+' : ''}{signal.score}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
+                        <div>
+                          <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
+                            籌碼訊號 ({stock.chip_signals.length}):
                           </div>
-                        )}
-
-                        {/* 技術訊號 */}
-                        {stock.technical_signals && stock.technical_signals.length > 0 && (
-                          <div>
-                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
-                              技術訊號 ({stock.technical_signals.length}):
-                            </div>
-                            <div className="space-y-0.5">
-                              {stock.technical_signals.map((signal, idx) => (
-                                <div key={idx} className="flex justify-between gap-3">
-                                  <span className="text-left">• {signal.name}</span>
-                                  <span className={`font-semibold ${
-                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
-                                  }`}>
-                                    {signal.score > 0 ? '+' : ''}{signal.score}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
+                          <div className="space-y-0.5">
+                            {stock.chip_signals.map((signal, idx) => (
+                              <div key={idx} className="flex justify-between gap-3">
+                                <span className="text-left">• {signal.name}</span>
+                                <span className={`font-semibold ${
+                                  signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
+                                }`}>
+                                  {signal.score > 0 ? '+' : ''}{signal.score}
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
                   </td>

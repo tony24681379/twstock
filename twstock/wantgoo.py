@@ -463,6 +463,84 @@ class WantgooFetcher(BaseFetcher):
 
         return weekly_data
 
+    async def fetch_monthly_revenue(
+        self, sid: str, months: int = 12, save_to_db: bool = True
+    ) -> pd.DataFrame:
+        """
+        抓取股票月營收資料
+
+        Args:
+            sid: 股票代碼
+            months: 取得幾個月的數據（預設 12 個月）
+            save_to_db: 是否儲存到資料庫
+
+        Returns:
+            pd.DataFrame: 包含近 N 個月的月營收數據
+
+        注意：fetch_url() 會自動套用 self.headers（包含 x-client-signature 和 cookies）
+        不需要額外傳遞 headers 參數
+        """
+        sid = sid.lower()  # 統一使用小寫 ID
+
+        try:
+            # 呼叫 Wantgoo API
+            # fetch_url() 內部會自動處理 headers 和重試邏輯
+            data = await self.fetch_url(
+                self.REPORT_URL
+                + "stock/"
+                + sid
+                + "/financial-statements/monthly-revenue-data"
+            )
+        except Exception as e:
+            if "fail after" in str(e):
+                print(f"Stock {sid} monthly revenue data unavailable")
+                return pd.DataFrame()
+            else:
+                raise e
+
+        # 轉換數據為 DataFrame
+        # API 回應格式：
+        # {
+        #   "date": 1764518400000,  // 時間戳記
+        #   "monthRevenue": 335003600,  // 月營收（千元）
+        #   "preMonthRevenueDiff": -2.5,  // 月增率 %
+        #   "preYearMonthRevenueDiff": 20.43,  // 年增率 %
+        #   "monthTotalRevenue": 3809054000,  // 累計營收（千元）
+        #   "preTotalRevenueDiff": 31.6  // 累計年增率 %
+        # }
+
+        records = []
+        for item in data:
+            # 將時間戳轉換為 datetime
+            dt = datetime.datetime.fromtimestamp(item["date"] / 1000)
+
+            records.append(
+                {
+                    "year": dt.year,
+                    "month": dt.month,
+                    "revenue": item.get("monthRevenue", 0),  # 千元
+                    "mom_change": item.get("preMonthRevenueDiff"),  # 可能為 None
+                    "yoy_change": item.get("preYearMonthRevenueDiff"),  # 可能為 None
+                    "cumulative_revenue": item.get("monthTotalRevenue"),
+                    "cumulative_yoy_change": item.get("preTotalRevenueDiff"),
+                }
+            )
+
+        # 按年月排序（最新在前）
+        df = pd.DataFrame(records).sort_values(
+            ["year", "month"], ascending=False
+        ).head(months)
+
+        # 儲存到資料庫
+        if save_to_db and self.db_manager and not df.empty:
+            try:
+                await self.db_manager.save_monthly_revenue(sid, df)
+                print(f"Monthly revenue for {sid} saved to database ({len(df)} records)")
+            except Exception as e:
+                print(f"Error saving monthly revenue to database: {e}")
+
+        return df
+
     def purify(
         self, candlesticks, major_investors, institutional_investors, lending, borrowing
     ):

@@ -84,7 +84,7 @@ class Stock(analytics.Analytics):
                 else 1.0
             )
             self.daily_data = await self.fetcher.fetch_daily(
-                self.sid, 490, outstanding_shares, save_to_db=True
+                self.sid, 200, outstanding_shares, save_to_db=True
             )
 
             if not self.daily_data.empty:
@@ -176,14 +176,18 @@ class Stock(analytics.Analytics):
                 return pd.Series(info_dict)
             return pd.Series()
 
-    async def load_daily_from_db(self) -> pd.DataFrame:
-        """從資料庫載入每日資料"""
+    async def load_daily_from_db(self, days: int = 150) -> pd.DataFrame:
+        """從資料庫載入每日資料
+
+        Args:
+            days: 載入最近幾天的資料（預設 150 天，足夠計算所有技術指標）
+        """
         async with self.db_manager.get_session() as session:
             # 載入價格資料（foreign 是保留字，需要引號）
             result = await session.execute(
                 text(
-                    """
-                    SELECT d.*, 
+                    f"""
+                    SELECT d.*,
                            i."foreign", i.investment_trust, i.dealer,
                            i.sum_holding_rate, i.foreign_holding_rate,
                            i.investment_trust_holding_rate, i.dealer_holding_rate,
@@ -194,6 +198,7 @@ class Stock(analytics.Analytics):
                     LEFT JOIN major_investors m ON d.stock_id = m.stock_id AND d.date = m.date
                     LEFT JOIN margin_trading mt ON d.stock_id = mt.stock_id AND d.date = mt.date
                     WHERE d.stock_id = :stock_id
+                      AND d.date >= CURRENT_DATE - INTERVAL '{days} days'
                     ORDER BY d.date DESC
                 """
                 ),
