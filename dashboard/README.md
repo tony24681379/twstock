@@ -84,23 +84,107 @@ dashboard/
 
 ## 部署
 
-### Nginx
+### Docker 部署（推薦）
+
+完整部署指南請參閱 [docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md)
 
 ```bash
-# 建置
-npm run build
+# 1. 設定環境變數
+cp .env.production.example .env
+# 編輯 .env 檔案，修改密碼與網域
 
-# 複製到 nginx 靜態目錄
+# 2. 建置並啟動所有服務（PostgreSQL + API + Frontend）
+docker-compose build
+docker-compose up -d
+
+# 3. 檢查服務狀態
+docker-compose ps
+
+# 4. 訪問前端
+open http://localhost:3000
+```
+
+### Docker 映像資訊
+
+- **基礎映像**: node:18-alpine（建置）+ nginx:1.25-alpine（運行）
+- **建置方式**: 多階段建置（builder + runtime）
+- **映像大小**: ~25MB
+- **關鍵特性**:
+  - Vite 建置優化
+  - Gzip 壓縮（節省 60-70% 傳輸）
+  - SPA 路由支援（try_files fallback）
+  - API 代理到後端（/api/ → http://api:8000）
+  - 靜態資源快取（JS/CSS 1年、圖片 30天）
+
+### 記憶體問題解決方案
+
+如果建置時遇到 exit code 137（記憶體不足），專案已設定記憶體優化：
+
+```bash
+# package.json 已包含記憶體優化腳本
+npm run build:prod  # 使用 NODE_OPTIONS="--max-old-space-size=2048"
+```
+
+Docker 建置會自動使用此優化設定。
+
+### 傳統部署方式
+
+#### Nginx（手動部署）
+
+```bash
+# 1. 建置（使用記憶體優化）
+npm run build:prod
+
+# 2. 複製到 nginx 靜態目錄
 cp -r dist/* /var/www/html/
 
-# nginx.conf 需設定 SPA fallback
+# 3. nginx.conf 設定 SPA fallback
 location / {
   try_files $uri $uri/ /index.html;
 }
+
+# 4. 啟用 Gzip 壓縮
+gzip on;
+gzip_types text/plain text/css application/javascript application/json;
+
+# 5. 設定靜態資源快取
+location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2)$ {
+  expires 1y;
+  add_header Cache-Control "public, immutable";
+}
 ```
 
-### GitHub Pages / Netlify
+#### GitHub Pages / Netlify / Vercel
 
 直接連接 GitHub repository，設定建置命令：
-- Build command: `npm run build`
-- Publish directory: `dist`
+- **Build command**: `npm run build:prod`
+- **Publish directory**: `dist`
+- **Environment variables**:
+  - `VITE_API_BASE_URL`: 後端 API 網址（例如 `https://api.yourdomain.com`）
+  - `VITE_REQUIRE_AUTH`: 是否需要登入（`true` 或 `false`）
+
+### 生產環境注意事項
+
+1. **必須修改的環境變數**：
+   - `VITE_API_BASE_URL` - 修改為實際後端 API 網址
+   - 確保後端 CORS 設定允許前端網域
+
+2. **效能優化建議**：
+   - 使用 CDN 加速靜態資源
+   - 啟用 Gzip/Brotli 壓縮
+   - 設定適當的 Cache-Control headers
+   - 使用 HTTP/2
+
+3. **監控與除錯**：
+   - 檢查瀏覽器 Console 是否有錯誤
+   - 檢查 Network tab 確認 API 請求正常
+   - 確認 CORS 設定正確
+
+### 疑難排解
+
+常見問題請參閱 [docs/DEPLOYMENT.md - 疑難排解章節](../docs/DEPLOYMENT.md#疑難排解)
+
+- 前端無法連接後端 → 檢查 VITE_API_BASE_URL 與 CORS 設定
+- 建置時記憶體不足 → 使用 `npm run build:prod`
+- 路由 404 錯誤 → 檢查 Nginx SPA fallback 設定
+- 靜態資源載入失敗 → 檢查 base path 設定

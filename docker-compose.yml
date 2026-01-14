@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: twstock-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: twstock
+      POSTGRES_USER: twstock_user
+      POSTGRES_PASSWORD: twstock_password123
+      # 設定時區為台北時間
+      TZ: Asia/Taipei
+      PGTZ: Asia/Taipei
+    ports:
+      - "5432:5432"
+    volumes:
+      # 持久化資料
+      - postgres_data:/var/lib/postgresql/data
+      # 初始化腳本
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U twstock_user -d twstock"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - twstock-network
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c work_mem=4MB
+      -c max_connections=200
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c min_wal_size=80MB
+      -c max_wal_size=1GB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c log_timezone='Asia/Taipei'
+      -c timezone='Asia/Taipei'
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: twstock-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://twstock_user:twstock_password123@postgres:5432/twstock
+      ALLOWED_ORIGINS: http://localhost:3000,http://frontend
+      MAX_WORKERS: ${MAX_WORKERS:-20}
+      MAX_API_WORKERS: ${MAX_API_WORKERS:-10}
+      MAX_CONCENTRATION_WORKERS: ${MAX_CONCENTRATION_WORKERS:-10}
+      ENABLE_CONCENTRATION: ${ENABLE_CONCENTRATION:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - twstock-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_REQUIRE_AUTH: ${VITE_REQUIRE_AUTH:-false}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+    container_name: twstock-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - twstock-network
+
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: twstock-pgadmin
+  #   restart: always
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@twstock.local
+  #     PGADMIN_DEFAULT_PASSWORD: admin123
+  #     PGADMIN_CONFIG_SERVER_MODE: 'False'
+  #     PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+  #   ports:
+  #     - "5050:80"
+  #   volumes:
+  #     - pgadmin_data:/var/lib/pgadmin
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  twstock-network:
+    driver: bridge
