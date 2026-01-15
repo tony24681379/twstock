@@ -23,9 +23,9 @@ export default function HomePage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        // 檢查是否為新格式（只有 chip 和 fundamental），且總和為 1.0
-        if (parsed.chip !== undefined && parsed.fundamental !== undefined && !parsed.technical) {
-          const sum = parsed.chip + parsed.fundamental
+        // 檢查是否為三維權重格式，且總和為 1.0
+        if (parsed.chip !== undefined && parsed.technical !== undefined && parsed.fundamental !== undefined) {
+          const sum = parsed.chip + parsed.technical + parsed.fundamental
           if (Math.abs(sum - 1.0) < 0.01) {
             return parsed
           }
@@ -35,7 +35,7 @@ export default function HomePage() {
       }
     }
     // 使用預設值並儲存到 localStorage
-    const defaultWeights = { chip: 0.5, fundamental: 0.5 }
+    const defaultWeights = { chip: 0.4, technical: 0.3, fundamental: 0.3 }
     localStorage.setItem('strengthWeights', JSON.stringify(defaultWeights))
     return defaultWeights
   })
@@ -52,19 +52,20 @@ export default function HomePage() {
   useEffect(() => {
     loadStocks()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortBy, order, weights.chip, weights.fundamental])
+  }, [sortBy, order, weights.chip, weights.technical, weights.fundamental])
 
   const loadStocks = async () => {
     try {
       setLoading(true)
       setError(null)
-      // 載入所有股票，傳遞權重參數（籌碼 + 基本面）
+      // 載入所有股票，傳遞權重參數（籌碼 + 技術 + 基本面）
       const response = await fetchStocks({
         sortBy,
         order,
         limit: PAGINATION.LOAD_ALL_LIMIT,
         offset: 0,
         chipWeight: weights.chip,
+        techWeight: weights.technical,
         fundWeight: weights.fundamental
       })
       setStocks(response.data)
@@ -145,12 +146,18 @@ export default function HomePage() {
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                   收盤價
                 </th>
-                {/* 兩種強度欄位（籌碼 + 基本面）*/}
+                {/* 三種強度欄位（籌碼 + 技術 + 基本面）*/}
                 <th
                   onClick={() => handleSort('chip_strength')}
                   className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
                   籌碼強度{getSortIndicator('chip_strength')}
+                </th>
+                <th
+                  onClick={() => handleSort('technical_strength')}
+                  className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  技術強度{getSortIndicator('technical_strength')}
                 </th>
                 <th
                   onClick={() => handleSort('fundamental_strength')}
@@ -201,6 +208,22 @@ export default function HomePage() {
                       <SignalTooltip
                         title={`籌碼訊號 (${stock.chip_signals.length})`}
                         signals={stock.chip_signals}
+                        show={true}
+                      />
+                    )}
+                  </td>
+
+                  {/* 技術強度 */}
+                  <td className="px-6 py-4 whitespace-nowrap text-center relative group">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getRawScoreBadgeClass(stock.technical_strength)}`}>
+                      {stock.technical_strength > 0 ? '+' : ''}{stock.technical_strength}
+                    </span>
+
+                    {/* 技術訊號 Tooltip */}
+                    {stock.technical_signals && stock.technical_signals.length > 0 && (
+                      <SignalTooltip
+                        title={`技術訊號 (${stock.technical_signals.length})`}
+                        signals={stock.technical_signals}
                         show={true}
                       />
                     )}

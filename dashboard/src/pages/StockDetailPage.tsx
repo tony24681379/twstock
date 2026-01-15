@@ -4,6 +4,7 @@ import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContai
 import CandlestickChart from '../components/CandlestickChart'
 import ChipsTabs from '../components/ChipsTabs'
 import { FundamentalCard } from '../components/FundamentalCard'
+import { TechnicalCard } from '../components/TechnicalCard'
 import IndicatorCharts from '../components/IndicatorCharts'
 import IndicatorToggles from '../components/IndicatorToggles'
 import PeriodSelector from '../components/PeriodSelector'
@@ -420,6 +421,15 @@ export default function StockDetailPage() {
             </table>
           </div>
         </div>
+      )}
+
+      {/* 技術分析卡 */}
+      {detail.technical_signals && detail.technical_signals.length > 0 && (
+        <TechnicalCard
+          technical_signals={detail.technical_signals}
+          technical_strength={detail.signal_strength}
+          className="mt-6"
+        />
       )}
 
       {/* 基本面資訊卡 */}

@@ -1,6 +1,7 @@
 """股票資料服務層"""
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
@@ -41,6 +42,12 @@ from twstock.database import (
     StockDaily,
     StockInfo,
     StockList,
+    StockTechnicalSignals,
+)
+from twstock.vectorized_signals import (
+    SIGNAL_TYPE_CROSSOVER,
+    SIGNAL_TYPE_STATE,
+    CROSSOVER_DISPLAY_DAYS,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,10 +56,10 @@ logger = logging.getLogger(__name__)
 async def calculate_all_strengths_for_stock(
     stock_id: str,
     bulk_info: dict,
-    bulk_daily: dict,
     bulk_eps: dict,
+    current_price: float,  # 🆕 直接傳入 close_price
     all_processor,
-    db_last_date: datetime,  # 🆕 新增參數
+    db_last_date: datetime,
 ) -> tuple:
     """
     計算單一股票的技術和基本面評分（支援快取）
@@ -60,8 +67,8 @@ async def calculate_all_strengths_for_stock(
     Args:
         stock_id: 股票代碼
         bulk_info: 批次股票資訊字典
-        bulk_daily: 批次日線資料字典
         bulk_eps: 批次 EPS 資料字典
+        current_price: 當前股價（從 SQL 查詢取得）
         all_processor: All 處理器實例
         db_last_date: 該股票在 DB 中的最新日期
 
@@ -86,12 +93,8 @@ async def calculate_all_strengths_for_stock(
             stock_info_dict = bulk_info[stock_id]
             eps_df = bulk_eps.get(stock_id)
 
-            # 取得當前股價（從 stock_info 或 daily data）
-            current_price = stock_info_dict.get("close", 0.0)
-            if current_price == 0 and stock_id in bulk_daily:
-                daily_data = bulk_daily[stock_id]
-                if not daily_data.empty:
-                    current_price = daily_data.iloc[-1]["close"]
+            # 🆕 優化：直接使用傳入的 current_price，不需要 fallback
+            # current_price 已從 SQL 查詢的 latest_price_subquery 取得
 
             # 計算基本面訊號
             fund_signals, fund_raw_score = FundamentalSignalService.calculate_signals(
@@ -119,14 +122,31 @@ class StockService:
     """股票資料服務"""
 
     @staticmethod
+    def normalize_technical_score(raw_score: int) -> int:
+        """
+        標準化技術訊號分數（-120~+164 → 0~100）
+
+        Args:
+            raw_score: 原始分數（-120~+164）
+
+        Returns:
+            標準化分數（0~100）
+        """
+        # 將 -120~+164 映射到 0~100
+        # 公式：((raw_score + 120) / 284) * 100
+        normalized = ((raw_score + 120) / 284) * 100
+        return int(max(0, min(100, normalized)))
+
+    @staticmethod
     async def get_stock_list(
         session: AsyncSession,
         sort_by: str = "stock_id",
         order: str = "asc",
         limit: int = 100,
         offset: int = 0,
-        chip_weight: float = 0.5,
-        fund_weight: float = 0.5,
+        chip_weight: float = 0.4,
+        tech_weight: float = 0.3,
+        fund_weight: float = 0.3,
     ) -> Tuple[List[StockListItem], PaginationMetadata]:
         """
         取得股票列表
@@ -137,8 +157,9 @@ class StockService:
             order: 排序方向（asc/desc）
             limit: 每頁筆數
             offset: 偏移量
-            chip_weight: 籌碼權重（預設 0.5）
-            fund_weight: 基本面權重（預設 0.5）
+            chip_weight: 籌碼權重（預設 0.4）
+            tech_weight: 技術權重（預設 0.3）
+            fund_weight: 基本面權重（預設 0.3）
 
         Returns:
             股票列表與分頁資訊
@@ -272,6 +293,19 @@ class StockService:
             )()
             concentration_by_stock[stock_id].append(conc)
 
+        # 批次查詢技術訊號資料
+        technical_signals_query = (
+            select(StockTechnicalSignals)
+            .where(StockTechnicalSignals.stock_id.in_(stock_ids))
+        )
+        technical_signals_result = await session.execute(technical_signals_query)
+        technical_signals_rows = technical_signals_result.scalars().all()
+
+        # 建立技術訊號字典
+        technical_signals_by_stock = {}
+        for signal in technical_signals_rows:
+            technical_signals_by_stock[signal.stock_id] = signal
+
         # 批次計算技術指標（使用 SQL JOIN，避免 N+1 查詢）
         import time
         import sys
@@ -290,11 +324,12 @@ class StockService:
         bulk_info = await api_db_manager.bulk_load_stock_info(stock_ids)
         print(f"⏱️  bulk_load_stock_info: {time.time() - t1:.2f}s", file=sys.stderr, flush=True)
 
-        t2 = time.time()
-        bulk_daily = await api_db_manager.bulk_load_daily_data(
-            stock_ids, days=200
-        )  # 200 日曆日 ≈ 137 交易日，dropna 後 78 行，緩衝 18 行
-        print(f"⏱️  bulk_load_daily_data: {time.time() - t2:.2f}s", file=sys.stderr, flush=True)
+        # 🆕 優化：移除不必要的 bulk_load_daily_data（close_price 已從 SQL 取得）
+        # t2 = time.time()
+        # bulk_daily = await api_db_manager.bulk_load_daily_data(
+        #     stock_ids, days=200
+        # )
+        # print(f"⏱️  bulk_load_daily_data: {time.time() - t2:.2f}s", file=sys.stderr, flush=True)
 
         # 批次載入 EPS 資料（用於基本面分析）
         t3 = time.time()
@@ -306,6 +341,12 @@ class StockService:
 
         all_processor = All()
 
+        # 🆕 建立 stock_id -> close_price 的映射（從 SQL 查詢結果取得）
+        close_prices = {
+            row[0].stock_id: row[2] if row[2] else 0.0
+            for row in rows
+        }
+
         # ✅ 並行計算技術和基本面訊號（核心性能優化）
         # 使用 Semaphore 限制同時處理的股票數量，避免記憶體爆炸
         semaphore = asyncio.Semaphore(100)  # 限制同時處理 100 支股票
@@ -316,10 +357,10 @@ class StockService:
                 return await calculate_all_strengths_for_stock(
                     stock_id,
                     bulk_info,
-                    bulk_daily,
                     bulk_eps,
+                    close_prices.get(stock_id, 0.0),  # 🆕 傳入 close_price
                     all_processor,
-                    db_last_date=stock_last_dates[stock_id],  # 🆕 傳入 DB 最新日期
+                    db_last_date=stock_last_dates[stock_id],
                 )
 
         # 並行執行所有股票的技術和基本面指標計算
@@ -362,6 +403,88 @@ class StockService:
 
             chip_strength = chip_raw_score  # 直接使用原始分數
 
+            # === 技術強度（從預計算表取得，含時效性過濾）===
+            tech_signal_data = technical_signals_by_stock.get(stock_id)
+            tech_strength = 0
+            tech_signals = []
+
+            if tech_signal_data:
+                # ✅ 優先使用 signals_detail（新欄位，包含訊號時效性資訊）
+                if tech_signal_data.signals_detail:
+                    try:
+                        # signals_detail 已被 SQLAlchemy 自動解析為 list，不需要 json.loads()
+                        signals_detail = tech_signal_data.signals_detail
+                        today = datetime.now().date()
+
+                        # 🔍 過濾過期訊號（雙重保險）
+                        valid_signals = []
+                        valid_raw_score = 0
+
+                        for sig in signals_detail:
+                            trigger_date = datetime.fromisoformat(sig["trigger_date"]).date()
+                            signal_type = sig.get("type", SIGNAL_TYPE_STATE)
+
+                            # 判斷訊號是否有效
+                            is_valid = False
+                            if signal_type == SIGNAL_TYPE_CROSSOVER:
+                                # 交叉訊號：檢查是否在 5 天內觸發
+                                days_since = (today - trigger_date).days
+                                is_valid = (days_since <= CROSSOVER_DISPLAY_DAYS)
+                            else:
+                                # 狀態訊號：檢查 is_valid 標記
+                                is_valid = sig.get("is_valid", False)
+
+                            if is_valid:
+                                valid_signals.append(sig)
+                                valid_raw_score += sig["score"]
+
+                        # 使用過濾後的有效訊號
+                        tech_strength = valid_raw_score
+                        tech_signals = [
+                            ChipSignal(
+                                name=sig["name"],
+                                triggered=True,
+                                score=sig["score"],
+                                description=None
+                            )
+                            for sig in valid_signals
+                        ]
+
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        logger.warning(f"解析 {stock_id} signals_detail 失敗: {e}")
+                        # Fallback 到 signals_json
+                        tech_strength = tech_signal_data.raw_score
+                        try:
+                            signals_list = json.loads(tech_signal_data.signals_json) if tech_signal_data.signals_json else []
+                            tech_signals = [
+                                ChipSignal(
+                                    name=s["signal_name"],
+                                    triggered=s["triggered"],
+                                    score=s["score"],
+                                    description=None
+                                )
+                                for s in signals_list
+                            ]
+                        except (json.JSONDecodeError, KeyError) as e2:
+                            logger.warning(f"解析 {stock_id} signals_json fallback 也失敗: {e2}")
+
+                else:
+                    # 如果沒有 signals_detail，fallback 到舊的 signals_json（向後相容）
+                    tech_strength = tech_signal_data.raw_score
+                    try:
+                        signals_list = json.loads(tech_signal_data.signals_json) if tech_signal_data.signals_json else []
+                        tech_signals = [
+                            ChipSignal(
+                                name=s["signal_name"],
+                                triggered=s["triggered"],
+                                score=s["score"],
+                                description=None
+                            )
+                            for s in signals_list
+                        ]
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.warning(f"解析 {stock_id} 技術訊號 JSON 失敗: {e}")
+
             # === 基本面強度（從並行計算結果取得）===
             scores = all_scores.get(
                 stock_id,
@@ -376,13 +499,16 @@ class StockService:
                 for s in scores["fundamental"]["signals"]
             ]
 
-            # === 綜合強度（使用自訂權重）===
-            # 先標準化各項分數，再計算加權平均（只用籌碼和基本面）
+            # === 綜合強度（使用自訂權重，三維：籌碼 + 技術 + 基本面）===
+            # 先標準化各項分數，再計算加權平均
             chip_normalized = SignalService.normalize_score(chip_strength)
+            tech_normalized = StockService.normalize_technical_score(tech_strength)
             fund_normalized = FundamentalSignalService.normalize_score(fund_strength)
 
             overall_strength = int(
-                chip_normalized * chip_weight + fund_normalized * fund_weight
+                chip_normalized * chip_weight +
+                tech_normalized * tech_weight +
+                fund_normalized * fund_weight
             )
 
             # 風險等級（基於綜合強度）
@@ -394,7 +520,7 @@ class StockService:
                 risk_level = "高"
 
             # 合併訊號（用於向後相容）
-            all_signals = chip_signals + fund_signals
+            all_signals = chip_signals + tech_signals + fund_signals
             major_signals = [s.name for s in all_signals[:3]]
 
             items.append(
@@ -402,17 +528,20 @@ class StockService:
                     stock_id=stock_id,
                     name=stock_list.name or stock_id,
                     close_price=close_price if close_price else 0.0,
-                    # 兩種強度（籌碼 + 基本面）
+                    # 三種強度（籌碼 + 技術 + 基本面）
                     chip_strength=chip_strength,
+                    technical_strength=tech_strength,
                     fundamental_strength=fund_strength,
                     overall_strength=overall_strength,
                     # 權重資訊
                     weights={
                         "chip": chip_weight,
+                        "technical": tech_weight,
                         "fundamental": fund_weight,
                     },
                     # 訊號列表
                     chip_signals=chip_signals,
+                    technical_signals=tech_signals,
                     fundamental_signals=fund_signals,
                     signals=all_signals,  # 合併（向後相容）
                     signal_count=len(all_signals),
@@ -559,11 +688,54 @@ class StockService:
             )
             chip_strength = SignalService.normalize_score(raw_score)
 
+        # 查詢技術訊號（含時效性過濾）
+        tech_signals = []
+        tech_signals_query = (
+            select(StockTechnicalSignals)
+            .where(StockTechnicalSignals.stock_id == stock_id)
+        )
+        tech_signals_result = await session.execute(tech_signals_query)
+        tech_signal_data = tech_signals_result.scalar_one_or_none()
+
+        if tech_signal_data and tech_signal_data.signals_detail:
+            try:
+                # signals_detail 已被 SQLAlchemy 自動解析為 list，不需要 json.loads()
+                signals_detail = tech_signal_data.signals_detail
+                today = datetime.now().date()
+
+                # 🔍 過濾過期訊號（雙重保險）
+                for sig in signals_detail:
+                    trigger_date = datetime.fromisoformat(sig["trigger_date"]).date()
+                    signal_type = sig.get("type", SIGNAL_TYPE_STATE)
+
+                    # 判斷訊號是否有效
+                    is_valid = False
+                    if signal_type == SIGNAL_TYPE_CROSSOVER:
+                        # 交叉訊號：檢查是否在 5 天內觸發
+                        days_since = (today - trigger_date).days
+                        is_valid = (days_since <= CROSSOVER_DISPLAY_DAYS)
+                    else:
+                        # 狀態訊號：檢查 is_valid 標記
+                        is_valid = sig.get("is_valid", False)
+
+                    if is_valid:
+                        tech_signals.append(
+                            ChipSignal(
+                                name=sig["name"],
+                                triggered=True,
+                                score=sig["score"],
+                                description=None
+                            )
+                        )
+
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.warning(f"解析 {stock_id} 詳情頁 signals_detail 失敗: {e}")
+
         return StockDetail(
             basic_info=basic_info,
             price_info=price_info,
             chip_signals=chip_signals,
-            technical_signals=[],  # 詳情頁不計算技術訊號
+            technical_signals=tech_signals,  # ✅ 返回過濾後的技術訊號
             expected_return=expected_return,
             win_rate=win_rate,
             concentration_summary=concentration_summary,

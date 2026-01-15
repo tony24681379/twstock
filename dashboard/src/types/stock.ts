@@ -10,8 +10,9 @@ export interface StockListItem {
   name: string
   close_price: number
 
-  // 兩種強度（籌碼 + 基本面）- 原始分數（可為負數）
+  // 三種強度（籌碼 + 技術 + 基本面）- 原始分數（可為負數）
   chip_strength: number        // -25 to +89（原始分數）
+  technical_strength: number   // -120 to +164（原始分數）
   fundamental_strength: number // -73 to +93（原始分數）
   overall_strength: number     // 0-100（標準化分數）
 
@@ -22,11 +23,13 @@ export interface StockListItem {
 
   // 訊號列表
   chip_signals: ChipSignal[]
-  fundamental_signals?: ChipSignal[] // 基本面訊號（optional）
+  technical_signals?: ChipSignal[]    // 技術訊號（optional）
+  fundamental_signals?: ChipSignal[]  // 基本面訊號（optional）
 
   // 權重配置（optional）
   weights?: {
     chip: number
+    technical: number
     fundamental: number
   }
 
@@ -83,7 +86,8 @@ export interface StockDetail {
 
   // 訊號列表
   chip_signals: ChipSignal[]
-  fundamental_signals?: ChipSignal[] // 基本面訊號（optional）
+  technical_signals?: ChipSignal[]    // 技術訊號（optional）
+  fundamental_signals?: ChipSignal[]  // 基本面訊號（optional）
 
   expected_return: number
   win_rate: number

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 
 interface Weights {
   chip: number
+  technical: number
   fundamental: number
 }
 
@@ -17,9 +18,9 @@ export function WeightController({ onChange, className = '' }: Props) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        // 檢查是否為新格式（只有 chip 和 fundamental），且總和為 1.0
-        if (parsed.chip !== undefined && parsed.fundamental !== undefined && !parsed.technical) {
-          const sum = parsed.chip + parsed.fundamental
+        // 檢查是否為三維權重格式，且總和為 1.0
+        if (parsed.chip !== undefined && parsed.technical !== undefined && parsed.fundamental !== undefined) {
+          const sum = parsed.chip + parsed.technical + parsed.fundamental
           if (Math.abs(sum - 1.0) < 0.01) {
             return parsed
           }
@@ -29,7 +30,7 @@ export function WeightController({ onChange, className = '' }: Props) {
       }
     }
     // 使用預設值並儲存到 localStorage
-    const defaultWeights = { chip: 0.5, fundamental: 0.5 }
+    const defaultWeights = { chip: 0.4, technical: 0.3, fundamental: 0.3 }
     localStorage.setItem('strengthWeights', JSON.stringify(defaultWeights))
     return defaultWeights
   })()
@@ -43,6 +44,7 @@ export function WeightController({ onChange, className = '' }: Props) {
   // 檢查是否有未套用的變更
   const hasChanges =
     weights.chip !== appliedWeights.chip ||
+    weights.technical !== appliedWeights.technical ||
     weights.fundamental !== appliedWeights.fundamental
 
   // 首次載入時通知父元件
@@ -51,14 +53,33 @@ export function WeightController({ onChange, className = '' }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 調整單個權重，自動調整另一個以維持總和 = 1.0
+  // 調整單個權重，其他兩個按比例分配剩餘權重
   const handleChange = (type: keyof Weights, value: number) => {
     const newWeights = { ...weights }
     newWeights[type] = value
 
-    // 另一個權重自動調整
-    const other: keyof Weights = type === 'chip' ? 'fundamental' : 'chip'
-    newWeights[other] = 1.0 - value
+    // 計算剩餘權重
+    const remaining = 1.0 - value
+
+    // 其他兩個權重
+    const others: (keyof Weights)[] = Object.keys(weights).filter(
+      (k) => k !== type
+    ) as (keyof Weights)[]
+
+    // 計算其他兩個權重的總和
+    const othersSum = others.reduce((sum, key) => sum + weights[key], 0)
+
+    // 按比例分配剩餘權重
+    if (othersSum > 0) {
+      others.forEach((key) => {
+        newWeights[key] = (weights[key] / othersSum) * remaining
+      })
+    } else {
+      // 如果其他兩個權重總和為 0，平均分配
+      others.forEach((key) => {
+        newWeights[key] = remaining / others.length
+      })
+    }
 
     setWeights(newWeights)
   }
@@ -102,6 +123,26 @@ export function WeightController({ onChange, className = '' }: Props) {
           />
         </div>
 
+        {/* 技術權重 */}
+        <div>
+          <div className="flex justify-between items-center mb-1">
+            <label className="text-xs text-gray-600 dark:text-gray-400">
+              技術
+            </label>
+            <span className="text-xs font-mono text-gray-700 dark:text-gray-300">
+              {(weights.technical * 100).toFixed(0)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={weights.technical * 100}
+            onChange={(e) => handleChange('technical', Number(e.target.value) / 100)}
+            className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-green-600"
+          />
+        </div>
+
         {/* 基本面權重 */}
         <div>
           <div className="flex justify-between items-center mb-1">
@@ -128,7 +169,7 @@ export function WeightController({ onChange, className = '' }: Props) {
         <div className="flex justify-between items-center text-xs mb-3">
           <span className="text-gray-500 dark:text-gray-400">總和</span>
           <span className="font-mono text-gray-700 dark:text-gray-300">
-            {((weights.chip + weights.fundamental) * 100).toFixed(0)}%
+            {((weights.chip + weights.technical + weights.fundamental) * 100).toFixed(0)}%
           </span>
         </div>
 

@@ -18,6 +18,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool
@@ -194,6 +195,104 @@ class StockList(Base):
     updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
 
     __table_args__ = (Index("idx_stock_list_active_market", "is_active", "market"),)
+
+
+class StockTechnicalIndicators(Base):
+    """股票技術指標預計算表"""
+
+    __tablename__ = "stock_technical_indicators"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    stock_id = Column(String, nullable=False, index=True, comment="股票代號")
+    date = Column(DateTime, nullable=False, comment="交易日期")
+    ma5 = Column(Float, comment="5日均線")
+    ma10 = Column(Float, comment="10日均線")
+    ma20 = Column(Float, comment="20日均線")
+    ma60 = Column(Float, comment="60日均線")
+    macd = Column(Float, comment="MACD")
+    macd_signal = Column(Float, comment="MACD 信號線")
+    macd_hist = Column(Float, comment="MACD 柱狀圖")
+    k9 = Column(Float, comment="KD K值")
+    d9 = Column(Float, comment="KD D值")
+    rsi = Column(Float, comment="RSI")
+    adx = Column(Float, comment="ADX")
+    bollinger_upper = Column(Float, comment="布林通道上軌")
+    bollinger_middle = Column(Float, comment="布林通道中軌")
+    bollinger_lower = Column(Float, comment="布林通道下軌")
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_tech_indicators_stock_date", "stock_id", "date", unique=True),
+        Index("idx_tech_indicators_updated", "updated_at"),
+    )
+
+
+class StockTechnicalSignals(Base):
+    """股票技術訊號預計算表"""
+
+    __tablename__ = "stock_technical_signals"
+
+    stock_id = Column(String, primary_key=True, index=True, comment="股票代號")
+    date = Column(DateTime, nullable=False, comment="最新訊號日期")
+    raw_score = Column(Integer, nullable=False, comment="原始分數 (-120~+164)")
+    normalized_score = Column(Integer, nullable=False, comment="標準化分數 (0-100)")
+    signal_count = Column(Integer, nullable=False, comment="訊號數量")
+    buy_signals = Column(Integer, default=0, comment="買入訊號數量")
+    sell_signals = Column(Integer, default=0, comment="賣出訊號數量")
+    signals_json = Column(String, comment="訊號詳情 JSON")
+    signals_detail = Column(JSONB, comment="訊號詳細資訊（包含trigger_date、type、is_valid等）")
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_tech_signals_score", "normalized_score"),
+        Index("idx_tech_signals_updated", "updated_at"),
+    )
+
+
+class StockSignalHistory(Base):
+    """股票技術訊號歷史記錄表
+
+    追蹤每個技術訊號的觸發日期和有效期，用於實現訊號時效性管理：
+    - 交叉/事件型訊號（crossover）：觸發後顯示5天，之後過期
+    - 狀態型訊號（state）：持續驗證有效性，條件失效時立即移除
+    """
+
+    __tablename__ = "stock_signal_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主鍵ID")
+    stock_id = Column(String, nullable=False, index=True, comment="股票代號")
+    signal_name = Column(String, nullable=False, comment="訊號名稱（如：黃金交叉、多頭排列）")
+    signal_type = Column(
+        String,
+        nullable=False,
+        comment="訊號類型：crossover（交叉/事件型，5天過期）或 state（狀態型，持續驗證）",
+    )
+    trigger_date = Column(DateTime, nullable=False, comment="訊號首次觸發日期")
+    last_valid_date = Column(
+        DateTime,
+        nullable=True,
+        comment="最後驗證有效的日期（NULL表示已失效）",
+    )
+    score = Column(Integer, nullable=False, comment="訊號分數（正數=買入，負數=賣出）")
+    signal_metadata = Column(JSONB, comment="額外元數據（JSON格式，可儲存觸發時的技術指標值）")
+    created_at = Column(DateTime, default=datetime.now, comment="記錄建立時間")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="記錄更新時間")
+
+    __table_args__ = (
+        # 複合唯一索引：同一股票的同一訊號在同一天只能有一筆記錄
+        Index(
+            "idx_unique_stock_signal",
+            "stock_id",
+            "signal_name",
+            "trigger_date",
+            unique=True,
+        ),
+        # 查詢優化索引
+        Index("idx_signal_history_stock_date", "stock_id", "trigger_date"),
+        Index("idx_signal_history_type", "signal_type"),
+        Index("idx_signal_history_valid", "last_valid_date"),
+        Index("idx_signal_history_stock_name", "stock_id", "signal_name"),
+    )
 
 
 class StockUpdateTracker(Base):

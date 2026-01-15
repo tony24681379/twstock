@@ -22,14 +22,15 @@ class StockListItem(BaseModel):
     name: str = Field(..., description="股票名稱")
     close_price: float = Field(..., description="收盤價")
 
-    # 兩種強度（籌碼 + 基本面）
+    # 三種強度（籌碼 + 技術 + 基本面）
     chip_strength: int = Field(..., ge=-25, le=89, description="籌碼強度（原始分數）")
+    technical_strength: int = Field(..., ge=-120, le=164, description="技術強度（原始分數）")
     fundamental_strength: int = Field(..., ge=-73, le=93, description="基本面強度（原始分數）")
     overall_strength: int = Field(..., ge=0, le=100, description="綜合強度 (0-100)")
 
     # 權重資訊
     weights: Dict[str, float] = Field(
-        default={"chip": 0.5, "fundamental": 0.5},
+        default={"chip": 0.4, "technical": 0.3, "fundamental": 0.3},
         description="計算 overall_strength 使用的權重"
     )
 
@@ -40,6 +41,7 @@ class StockListItem(BaseModel):
 
     # 訊號列表
     chip_signals: List[ChipSignal] = Field(default_factory=list, description="籌碼訊號")
+    technical_signals: List[ChipSignal] = Field(default_factory=list, description="技術訊號")
     fundamental_signals: List[ChipSignal] = Field(
         default_factory=list, description="基本面訊號"
     )
