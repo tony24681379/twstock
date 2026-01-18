@@ -1,4 +1,6 @@
 import { ReactNode, useEffect, useState } from 'react'
+import { LoginButton } from './LoginButton'
+import { useAuth } from '../contexts/AuthContext'
 
 interface LayoutProps {
   children: ReactNode
@@ -6,6 +8,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const [darkMode, setDarkMode] = useState(false)
+  const { requireAuth } = useAuth()
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme')
@@ -33,13 +36,19 @@ export default function Layout({ children }: LayoutProps) {
           <h1 className="text-2xl font-heading font-semibold text-gray-900 dark:text-gray-100">
             台股籌碼集中度儀表板
           </h1>
-          <button
-            onClick={toggleTheme}
-            className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-            aria-label="切換主題"
-          >
-            {darkMode ? '☀️ 淺色' : '🌙 深色'}
-          </button>
+          <div className="flex items-center gap-4">
+            {/* 如果啟用驗證，顯示登入/登出按鈕 */}
+            {requireAuth && <LoginButton />}
+
+            {/* 主題切換按鈕 */}
+            <button
+              onClick={toggleTheme}
+              className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              aria-label="切換主題"
+            >
+              {darkMode ? '☀️ 淺色' : '🌙 深色'}
+            </button>
+          </div>
         </div>
       </header>
 

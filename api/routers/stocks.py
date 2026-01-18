@@ -1,8 +1,11 @@
 """股票 API 路由"""
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.auth import AuthUser, get_current_user
 from api.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from api.models.chart import ChartDataResponse
 from api.models.stock import (
@@ -40,6 +43,7 @@ async def list_stocks(
     tech_weight: float = Query(0.3, ge=0, le=1, description="技術權重"),
     fund_weight: float = Query(0.3, ge=0, le=1, description="基本面權重"),
     session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
 ):
     """
     取得股票列表（支援自訂權重）
@@ -110,6 +114,7 @@ async def get_stock_chart(
     response: Response,
     period: str = Query("3M", description="時間範圍 (1M/3M/6M/1Y)"),
     session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
 ):
     """
     取得股票 K 線圖表資料（OHLCV）
@@ -154,6 +159,7 @@ async def get_stock_history(
     stock_id: str,
     weeks: int = Query(12, ge=1, le=52, description="週數"),
     session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
 ):
     """
     取得股票籌碼集中度歷史資料
@@ -187,6 +193,7 @@ async def get_stock_chips(
     stock_id: str,
     days: int = Query(30, ge=1, le=90, description="查詢天數"),
     session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
 ):
     """
     取得股票籌碼資料（三大法人、主力、融資融券）
@@ -217,7 +224,8 @@ async def get_stock_chips(
 @router.get("/{stock_id}/fundamental", response_model=FundamentalInfo)
 async def get_stock_fundamental(
     stock_id: str,
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
 ):
     """
     取得股票基本面資訊（詳細頁專用）
@@ -245,7 +253,11 @@ async def get_stock_fundamental(
 
 
 @router.get("/{stock_id}", response_model=StockDetail)
-async def get_stock(stock_id: str, session: AsyncSession = Depends(get_db_session)):
+async def get_stock(
+    stock_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
+):
     """
     取得特定股票的詳細資訊
 

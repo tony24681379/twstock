@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import { ProtectedRoute } from './components/ProtectedRoute'
+import { LoginPage } from './pages/LoginPage'
 
 // Code Splitting: 延遲載入頁面元件
 const HomePage = lazy(() => import('./pages/HomePage'))
@@ -17,14 +19,27 @@ function PageLoading() {
 
 function App() {
   return (
-    <Layout>
-      <Suspense fallback={<PageLoading />}>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/stocks/:stockId" element={<StockDetailPage />} />
-        </Routes>
-      </Suspense>
-    </Layout>
+    <Routes>
+      {/* 登入頁面（不需要驗證） */}
+      <Route path="/login" element={<LoginPage />} />
+
+      {/* 受保護的路由（需要驗證） */}
+      <Route
+        path="/*"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Suspense fallback={<PageLoading />}>
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/stocks/:stockId" element={<StockDetailPage />} />
+                </Routes>
+              </Suspense>
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   )
 }
 
