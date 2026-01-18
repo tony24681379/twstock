@@ -297,9 +297,18 @@ class InstitutionalData(BaseModel):
     """三大法人買賣超資料"""
 
     date: datetime = Field(..., description="日期")
-    foreign: Optional[float] = Field(None, description="外資買賣超 (張)")
-    investment_trust: Optional[float] = Field(None, description="投信買賣超 (張)")
-    dealer: Optional[float] = Field(None, description="自營商買賣超 (張)")
+
+    # 張數欄位（資料庫儲存）
+    foreign_shares: Optional[float] = Field(None, description="外資買賣超 (張)")
+    investment_trust_shares: Optional[float] = Field(None, description="投信買賣超 (張)")
+    dealer_shares: Optional[float] = Field(None, description="自營商買賣超 (張)")
+
+    # 百分比欄位（API 即時計算）
+    foreign: Optional[float] = Field(None, description="外資買賣超 (%)")
+    investment_trust: Optional[float] = Field(None, description="投信買賣超 (%)")
+    dealer: Optional[float] = Field(None, description="自營商買賣超 (%)")
+
+    # 持股比率（保持不變）
     sum_holding_rate: Optional[float] = Field(
         None, description="三大法人持股比率合計 (%)"
     )
@@ -326,6 +335,8 @@ class MarginTradingData(BaseModel):
     lending_balance: Optional[float] = Field(None, description="融資餘額 (張)")
     borrowing_balance: Optional[float] = Field(None, description="融券餘額 (張)")
     balance_limit: Optional[float] = Field(None, description="融資融券限額")
+    lending_change: float = Field(0.0, description="融資餘額變化 (張)")
+    borrowing_change: float = Field(0.0, description="融券餘額變化 (張)")
 
 
 class ChipsData(BaseModel):

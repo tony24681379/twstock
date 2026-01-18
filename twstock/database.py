@@ -76,13 +76,13 @@ class InstitutionalInvestors(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     stock_id = Column(String, nullable=False, index=True, comment="股票代號")
     date = Column(DateTime, nullable=False, comment="交易日期")
-    foreign = Column(Float, comment="外資買賣超")
-    investment_trust = Column(Float, comment="投信買賣超")
-    dealer = Column(Float, comment="自營商買賣超")
-    sum_holding_rate = Column(Float, comment="三大法人持股比率合計")
-    foreign_holding_rate = Column(Float, comment="外資持股比率")
-    investment_trust_holding_rate = Column(Float, comment="投信持股比率")
-    dealer_holding_rate = Column(Float, comment="自營商持股比率")
+    foreign_shares = Column(Float, comment="外資買賣超(張)")
+    investment_trust_shares = Column(Float, comment="投信買賣超(張)")
+    dealer_shares = Column(Float, comment="自營商買賣超(張)")
+    sum_holding_rate = Column(Float, comment="三大法人持股比率合計(%)")
+    foreign_holding_rate = Column(Float, comment="外資持股比率(%)")
+    investment_trust_holding_rate = Column(Float, comment="投信持股比率(%)")
+    dealer_holding_rate = Column(Float, comment="自營商持股比率(%)")
 
     __table_args__ = (
         Index("idx_institutional_stock_date", "stock_id", "date", unique=True),
@@ -240,7 +240,9 @@ class StockTechnicalSignals(Base):
     buy_signals = Column(Integer, default=0, comment="買入訊號數量")
     sell_signals = Column(Integer, default=0, comment="賣出訊號數量")
     signals_json = Column(String, comment="訊號詳情 JSON")
-    signals_detail = Column(JSONB, comment="訊號詳細資訊（包含trigger_date、type、is_valid等）")
+    signals_detail = Column(
+        JSONB, comment="訊號詳細資訊（包含trigger_date、type、is_valid等）"
+    )
     updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
 
     __table_args__ = (
@@ -261,7 +263,9 @@ class StockSignalHistory(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="主鍵ID")
     stock_id = Column(String, nullable=False, index=True, comment="股票代號")
-    signal_name = Column(String, nullable=False, comment="訊號名稱（如：黃金交叉、多頭排列）")
+    signal_name = Column(
+        String, nullable=False, comment="訊號名稱（如：黃金交叉、多頭排列）"
+    )
     signal_type = Column(
         String,
         nullable=False,
@@ -274,9 +278,13 @@ class StockSignalHistory(Base):
         comment="最後驗證有效的日期（NULL表示已失效）",
     )
     score = Column(Integer, nullable=False, comment="訊號分數（正數=買入，負數=賣出）")
-    signal_metadata = Column(JSONB, comment="額外元數據（JSON格式，可儲存觸發時的技術指標值）")
+    signal_metadata = Column(
+        JSONB, comment="額外元數據（JSON格式，可儲存觸發時的技術指標值）"
+    )
     created_at = Column(DateTime, default=datetime.now, comment="記錄建立時間")
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="記錄更新時間")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="記錄更新時間"
+    )
 
     __table_args__ = (
         # 複合唯一索引：同一股票的同一訊號在同一天只能有一筆記錄
@@ -522,7 +530,7 @@ class DatabaseManager:
                     )
 
                     # 法人資料
-                    if "foreign" in row:
+                    if "foreign_shares" in row:
                         inst_id = int(
                             hashlib.md5(
                                 f"{stock_id}_inst_{date_value.strftime('%Y%m%d')}".encode()
@@ -534,11 +542,11 @@ class DatabaseManager:
                                 "id": inst_id,
                                 "stock_id": stock_id,
                                 "date": date_value,
-                                "foreign": safe_float(row.get("foreign")),
-                                "investment_trust": safe_float(
-                                    row.get("investment_trust")
+                                "foreign_shares": safe_float(row.get("foreign_shares")),
+                                "investment_trust_shares": safe_float(
+                                    row.get("investment_trust_shares")
                                 ),
-                                "dealer": safe_float(row.get("dealer")),
+                                "dealer_shares": safe_float(row.get("dealer_shares")),
                                 "sum_holding_rate": safe_float(
                                     row.get("sum_holding_rate")
                                 ),
@@ -619,9 +627,9 @@ class DatabaseManager:
                         text(
                             """
                             INSERT INTO institutional_investors
-                            (id, stock_id, date, "foreign", investment_trust, dealer, sum_holding_rate,
+                            (id, stock_id, date, foreign_shares, investment_trust_shares, dealer_shares, sum_holding_rate,
                              foreign_holding_rate, investment_trust_holding_rate, dealer_holding_rate)
-                            VALUES (:id, :stock_id, :date, :foreign, :investment_trust, :dealer, :sum_holding_rate,
+                            VALUES (:id, :stock_id, :date, :foreign_shares, :investment_trust_shares, :dealer_shares, :sum_holding_rate,
                                     :foreign_holding_rate, :investment_trust_holding_rate, :dealer_holding_rate)
                             ON CONFLICT (stock_id, date) DO NOTHING
                         """
@@ -1082,6 +1090,7 @@ class DatabaseManager:
 
         async with self.get_session() as session:
             # 🔧 修復：加入 LEFT JOIN 載入機構數據（技術指標計算需要）
+            # 🆕 讀取張數並 JOIN stock_info 來計算百分比
             result = await session.execute(
                 text(
                     f"""
@@ -1093,9 +1102,10 @@ class DatabaseManager:
                         d.low,
                         d.close,
                         d.volume,
-                        COALESCE(i.foreign, 0) as foreign,
-                        COALESCE(i.investment_trust, 0) as investment_trust,
-                        COALESCE(i.dealer, 0) as dealer,
+                        COALESCE(i.foreign_shares, 0) as foreign_shares,
+                        COALESCE(i.investment_trust_shares, 0) as investment_trust_shares,
+                        COALESCE(i.dealer_shares, 0) as dealer_shares,
+                        COALESCE(s.outstanding_shares, 1) as outstanding_shares,
                         COALESCE(i.foreign_holding_rate, 0) as foreign_holding_rate,
                         COALESCE(i.investment_trust_holding_rate, 0) as investment_trust_holding_rate,
                         COALESCE(i.dealer_holding_rate, 0) as dealer_holding_rate,
@@ -1110,6 +1120,8 @@ class DatabaseManager:
                     FROM stock_daily d
                     LEFT JOIN institutional_investors i
                         ON d.stock_id = i.stock_id AND d.date = i.date
+                    LEFT JOIN stock_info s
+                        ON d.stock_id = s.stock_id
                     LEFT JOIN major_investors m
                         ON d.stock_id = m.stock_id AND d.date = m.date
                     LEFT JOIN margin_trading mt
@@ -1129,6 +1141,26 @@ class DatabaseManager:
                 if stock_id not in stock_data_dict:
                     stock_data_dict[stock_id] = []
 
+                # 🆕 從張數計算百分比
+                total_stock = (
+                    row.outstanding_shares / 1000 if row.outstanding_shares > 0 else 1.0
+                )
+                foreign_pct = (
+                    round(row.foreign_shares / total_stock * 100, 2)
+                    if total_stock > 0
+                    else 0
+                )
+                investment_trust_pct = (
+                    round(row.investment_trust_shares / total_stock * 100, 2)
+                    if total_stock > 0
+                    else 0
+                )
+                dealer_pct = (
+                    round(row.dealer_shares / total_stock * 100, 2)
+                    if total_stock > 0
+                    else 0
+                )
+
                 stock_data_dict[stock_id].append(
                     {
                         "date": row.date,
@@ -1137,9 +1169,9 @@ class DatabaseManager:
                         "low": row.low,
                         "close": row.close,
                         "volume": row.volume,
-                        "foreign": row.foreign,
-                        "investment_trust": row.investment_trust,
-                        "dealer": row.dealer,
+                        "foreign": foreign_pct,
+                        "investment_trust": investment_trust_pct,
+                        "dealer": dealer_pct,
                         "foreign_holding_rate": row.foreign_holding_rate,
                         "investment_trust_holding_rate": row.investment_trust_holding_rate,
                         "dealer_holding_rate": row.dealer_holding_rate,

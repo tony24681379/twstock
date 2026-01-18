@@ -119,7 +119,7 @@ function ChipsTabs({ stockId }: ChipsTabsProps) {
           <MajorTable data={chipsData.major} formatDate={formatDate} formatNumberWithSign={formatNumberWithSign} />
         )}
         {activeTab === 'margin' && (
-          <MarginTable data={chipsData.margin} formatDate={formatDate} formatNumber={formatNumber} />
+          <MarginTable data={chipsData.margin} formatDate={formatDate} formatNumber={formatNumber} formatNumberWithSign={formatNumberWithSign} />
         )}
         {activeTab === 'concentration' && (
           <ConcentrationSummary data={chipsData.concentration} formatDate={formatDate} formatNumber={formatNumber} />
@@ -152,8 +152,11 @@ function InstitutionalTable({
           <tr>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">日期</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">外資 (張)</th>
+            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">外資 (%)</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">投信 (張)</th>
+            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">投信 (%)</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">自營商 (張)</th>
+            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">自營商 (%)</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">三大法人持股 (%)</th>
           </tr>
         </thead>
@@ -164,12 +167,21 @@ function InstitutionalTable({
                 {formatDate(row.date)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium">
+                {formatNumberWithSign(row.foreign_shares)}
+              </td>
+              <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-600 dark:text-gray-400">
                 {formatNumberWithSign(row.foreign)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium">
+                {formatNumberWithSign(row.investment_trust_shares)}
+              </td>
+              <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-600 dark:text-gray-400">
                 {formatNumberWithSign(row.investment_trust)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium">
+                {formatNumberWithSign(row.dealer_shares)}
+              </td>
+              <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-600 dark:text-gray-400">
                 {formatNumberWithSign(row.dealer)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900 dark:text-gray-100">
@@ -235,11 +247,13 @@ function MajorTable({
 function MarginTable({
   data,
   formatDate,
-  formatNumber
+  formatNumber,
+  formatNumberWithSign
 }: {
   data: MarginTradingData[]
   formatDate: (date: string) => string
   formatNumber: (num: number | null) => string
+  formatNumberWithSign: (num: number | null) => JSX.Element | string
 }) {
   if (data.length === 0) {
     return <p className="text-gray-500 dark:text-gray-400">無資料</p>
@@ -252,7 +266,9 @@ function MarginTable({
           <tr>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">日期</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">融資餘額 (張)</th>
+            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">資增 (張)</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">融券餘額 (張)</th>
+            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">券增 (張)</th>
             <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">額度限制</th>
           </tr>
         </thead>
@@ -265,8 +281,14 @@ function MarginTable({
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900 dark:text-gray-100">
                 {formatNumber(row.lending_balance)}
               </td>
+              <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium">
+                {formatNumberWithSign(row.lending_change)}
+              </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900 dark:text-gray-100">
                 {formatNumber(row.borrowing_balance)}
+              </td>
+              <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium">
+                {formatNumberWithSign(row.borrowing_change)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900 dark:text-gray-100">
                 {formatNumber(row.balance_limit)}

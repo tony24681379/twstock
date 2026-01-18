@@ -251,32 +251,78 @@ export default function HomePage() {
                       {stock.overall_strength}
                     </span>
 
-                    {/* Tooltip：顯示籌碼訊號 */}
-                    {(stock.chip_signals && stock.chip_signals.length > 0) && (
+                    {/* Tooltip：顯示三種訊號（籌碼 + 技術 + 基本面）*/}
+                    {((stock.chip_signals && stock.chip_signals.length > 0) ||
+                      (stock.technical_signals && stock.technical_signals.length > 0) ||
+                      (stock.fundamental_signals && stock.fundamental_signals.length > 0)) && (
                       <div className="hidden group-hover:block absolute top-full left-1/2 -translate-x-1/2 mt-2
                                       bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900
-                                      rounded-lg px-3 py-2 text-xs shadow-xl z-50 min-w-[300px]
+                                      rounded-lg px-3 py-2 text-xs shadow-xl z-50 min-w-[300px] max-h-[500px] overflow-y-auto
                                       before:content-[''] before:absolute before:bottom-full before:left-1/2 before:-translate-x-1/2
                                       before:border-4 before:border-transparent before:border-b-gray-900 dark:before:border-b-gray-100">
 
                         {/* 籌碼訊號 */}
-                        <div>
-                          <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
-                            籌碼訊號 ({stock.chip_signals.length}):
+                        {stock.chip_signals && stock.chip_signals.length > 0 && (
+                          <div>
+                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
+                              籌碼訊號 ({stock.chip_signals.length}):
+                            </div>
+                            <div className="space-y-0.5">
+                              {stock.chip_signals.map((signal, idx) => (
+                                <div key={idx} className="flex justify-between gap-3">
+                                  <span className="text-left">• {signal.name}</span>
+                                  <span className={`font-semibold ${
+                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
+                                  }`}>
+                                    {signal.score > 0 ? '+' : ''}{signal.score}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                          <div className="space-y-0.5">
-                            {stock.chip_signals.map((signal, idx) => (
-                              <div key={idx} className="flex justify-between gap-3">
-                                <span className="text-left">• {signal.name}</span>
-                                <span className={`font-semibold ${
-                                  signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
-                                }`}>
-                                  {signal.score > 0 ? '+' : ''}{signal.score}
-                                </span>
-                              </div>
-                            ))}
+                        )}
+
+                        {/* 技術訊號 */}
+                        {stock.technical_signals && stock.technical_signals.length > 0 && (
+                          <div className="border-t border-gray-700 dark:border-gray-300 mt-2 pt-2">
+                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
+                              技術訊號 ({stock.technical_signals.length}):
+                            </div>
+                            <div className="space-y-0.5">
+                              {stock.technical_signals.map((signal, idx) => (
+                                <div key={idx} className="flex justify-between gap-3">
+                                  <span className="text-left">• {signal.name}</span>
+                                  <span className={`font-semibold ${
+                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
+                                  }`}>
+                                    {signal.score > 0 ? '+' : ''}{signal.score}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        )}
+
+                        {/* 基本面訊號 */}
+                        {stock.fundamental_signals && stock.fundamental_signals.length > 0 && (
+                          <div className="border-t border-gray-700 dark:border-gray-300 mt-2 pt-2">
+                            <div className="font-semibold mb-1.5 border-b border-gray-700 dark:border-gray-300 pb-1">
+                              基本面訊號 ({stock.fundamental_signals.length}):
+                            </div>
+                            <div className="space-y-0.5">
+                              {stock.fundamental_signals.map((signal, idx) => (
+                                <div key={idx} className="flex justify-between gap-3">
+                                  <span className="text-left">• {signal.name}</span>
+                                  <span className={`font-semibold ${
+                                    signal.score > 0 ? 'text-green-400 dark:text-green-600' : 'text-red-400 dark:text-red-600'
+                                  }`}>
+                                    {signal.score > 0 ? '+' : ''}{signal.score}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </td>

@@ -527,15 +527,19 @@ class WantgooFetcher(BaseFetcher):
             )
 
         # 按年月排序（最新在前）
-        df = pd.DataFrame(records).sort_values(
-            ["year", "month"], ascending=False
-        ).head(months)
+        df = (
+            pd.DataFrame(records)
+            .sort_values(["year", "month"], ascending=False)
+            .head(months)
+        )
 
         # 儲存到資料庫
         if save_to_db and self.db_manager and not df.empty:
             try:
                 await self.db_manager.save_monthly_revenue(sid, df)
-                print(f"Monthly revenue for {sid} saved to database ({len(df)} records)")
+                print(
+                    f"Monthly revenue for {sid} saved to database ({len(df)} records)"
+                )
             except Exception as e:
                 print(f"Error saving monthly revenue to database: {e}")
 
@@ -637,21 +641,15 @@ class WantgooFetcher(BaseFetcher):
                 - data["investment_trust_holding_rate"].astype(float),
                 2,
             ),
-            foreign=round(
+            foreign_shares=round(
                 (data["sumForeignNoDealer"] + data["sumForeignWithDealer"]).astype(
                     float
-                )
-                / self.total_stock
-                * 100,
+                ),
                 2,
             ),
-            investment_trust=round(
-                data["investment_trust"].astype(float) / self.total_stock * 100, 2
-            ),
-            dealer=round(
-                (data["sumDealerBySelf"] + data["sumDealerHedging"]).astype(float)
-                / self.total_stock
-                * 100,
+            investment_trust_shares=round(data["investment_trust"].astype(float), 2),
+            dealer_shares=round(
+                (data["sumDealerBySelf"] + data["sumDealerHedging"]).astype(float),
                 2,
             ),
         )
@@ -673,9 +671,9 @@ class WantgooFetcher(BaseFetcher):
                 "close",
                 "high",
                 "low",
-                "foreign",
-                "investment_trust",
-                "dealer",
+                "foreign_shares",
+                "investment_trust_shares",
+                "dealer_shares",
                 "sum_holding_rate",
                 "foreign_holding_rate",
                 "investment_trust_holding_rate",

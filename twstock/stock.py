@@ -182,13 +182,21 @@ class Stock(analytics.Analytics):
         Args:
             days: 載入最近幾天的資料（預設 150 天，足夠計算所有技術指標）
         """
+        # 獲取 outstanding_shares 用於計算百分比
+        outstanding_shares = (
+            float(self.info_data.get("outstanding_shares", 1.0))
+            if self.info_data is not None
+            else 1.0
+        )
+        total_stock = outstanding_shares / 1000 if outstanding_shares > 0 else 1.0
+
         async with self.db_manager.get_session() as session:
-            # 載入價格資料（foreign 是保留字，需要引號）
+            # 載入價格資料（讀取張數欄位）
             result = await session.execute(
                 text(
                     f"""
                     SELECT d.*,
-                           i."foreign", i.investment_trust, i.dealer,
+                           i.foreign_shares, i.investment_trust_shares, i.dealer_shares,
                            i.sum_holding_rate, i.foreign_holding_rate,
                            i.investment_trust_holding_rate, i.dealer_holding_rate,
                            m.major_investors, m.agent_diff, m.skp5, m.skp20,
@@ -208,6 +216,21 @@ class Stock(analytics.Analytics):
             # 轉換為 DataFrame
             data = []
             for row in result:
+                # 從張數計算百分比
+                foreign_pct = 0
+                investment_trust_pct = 0
+                dealer_pct = 0
+
+                if total_stock > 0:
+                    if row.foreign_shares:
+                        foreign_pct = round(row.foreign_shares / total_stock * 100, 2)
+                    if row.investment_trust_shares:
+                        investment_trust_pct = round(
+                            row.investment_trust_shares / total_stock * 100, 2
+                        )
+                    if row.dealer_shares:
+                        dealer_pct = round(row.dealer_shares / total_stock * 100, 2)
+
                 data.append(
                     {
                         "date": row.date,
@@ -216,9 +239,9 @@ class Stock(analytics.Analytics):
                         "high": row.high,
                         "low": row.low,
                         "close": row.close,
-                        "foreign": row.foreign or 0,
-                        "investment_trust": row.investment_trust or 0,
-                        "dealer": row.dealer or 0,
+                        "foreign": foreign_pct,
+                        "investment_trust": investment_trust_pct,
+                        "dealer": dealer_pct,
                         "sum_holding_rate": row.sum_holding_rate or 0,
                         "foreign_holding_rate": row.foreign_holding_rate or 0,
                         "investment_trust_holding_rate": row.investment_trust_holding_rate

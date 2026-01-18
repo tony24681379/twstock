@@ -934,6 +934,16 @@ class StockService:
         institutional_result = await session.execute(institutional_query)
         institutional_records = institutional_result.scalars().all()
 
+        # 查詢 StockInfo 獲取 outstanding_shares（用於計算百分比）
+        stock_info_query = select(StockInfo).where(StockInfo.stock_id == stock_id)
+        stock_info_result = await session.execute(stock_info_query)
+        stock_info = stock_info_result.scalar_one_or_none()
+
+        # 計算 total_stock（張數單位）
+        total_stock = None
+        if stock_info and stock_info.outstanding_shares:
+            total_stock = stock_info.outstanding_shares / 1000  # 股 → 千股（張）
+
         # 查詢主力資料
         major_query = (
             select(MajorInvestors)
@@ -968,20 +978,42 @@ class StockService:
         if not institutional_records and not major_records and not margin_records:
             return None
 
-        # 組裝回應資料
-        institutional_data = [
-            InstitutionalData(
-                date=record.date,
-                foreign=record.foreign,
-                investment_trust=record.investment_trust,
-                dealer=record.dealer,
-                sum_holding_rate=record.sum_holding_rate,
-                foreign_holding_rate=record.foreign_holding_rate,
-                investment_trust_holding_rate=record.investment_trust_holding_rate,
-                dealer_holding_rate=record.dealer_holding_rate,
+        # 組裝三大法人資料
+        institutional_data = []
+        for record in institutional_records:
+            # 從張數計算百分比（API 層即時計算）
+            foreign_pct = None
+            investment_trust_pct = None
+            dealer_pct = None
+
+            if total_stock is not None and total_stock > 0:
+                if record.foreign_shares is not None:
+                    foreign_pct = round(record.foreign_shares / total_stock * 100, 2)
+                if record.investment_trust_shares is not None:
+                    investment_trust_pct = round(
+                        record.investment_trust_shares / total_stock * 100, 2
+                    )
+                if record.dealer_shares is not None:
+                    dealer_pct = round(record.dealer_shares / total_stock * 100, 2)
+
+            institutional_data.append(
+                InstitutionalData(
+                    date=record.date,
+                    # 張數欄位（來自資料庫）
+                    foreign_shares=record.foreign_shares,
+                    investment_trust_shares=record.investment_trust_shares,
+                    dealer_shares=record.dealer_shares,
+                    # 百分比欄位（即時計算）
+                    foreign=foreign_pct,
+                    investment_trust=investment_trust_pct,
+                    dealer=dealer_pct,
+                    # 持股比率（來自資料庫）
+                    sum_holding_rate=record.sum_holding_rate,
+                    foreign_holding_rate=record.foreign_holding_rate,
+                    investment_trust_holding_rate=record.investment_trust_holding_rate,
+                    dealer_holding_rate=record.dealer_holding_rate,
+                )
             )
-            for record in institutional_records
-        ]
 
         major_data = [
             MajorInvestorData(
@@ -993,15 +1025,35 @@ class StockService:
             for record in major_records
         ]
 
-        margin_data = [
-            MarginTradingData(
-                date=record.date,
-                lending_balance=record.lending_balance,
-                borrowing_balance=record.borrowing_balance,
-                balance_limit=record.balance_limit,
+        # 組裝融資融券資料並計算每日差額
+        # margin_records 已按 desc(date) 排序：[最新, 次新, ..., 最舊]
+        margin_data = []
+
+        for i, record in enumerate(margin_records):
+            # 前一日 = 下一個 index（因為是 desc 排序）
+            prev_record = margin_records[i + 1] if i + 1 < len(margin_records) else None
+
+            # 計算差額
+            lending_change = 0.0
+            borrowing_change = 0.0
+
+            if prev_record:
+                # 當前日 - 前一日
+                if record.lending_balance is not None and prev_record.lending_balance is not None:
+                    lending_change = record.lending_balance - prev_record.lending_balance
+                if record.borrowing_balance is not None and prev_record.borrowing_balance is not None:
+                    borrowing_change = record.borrowing_balance - prev_record.borrowing_balance
+
+            margin_data.append(
+                MarginTradingData(
+                    date=record.date,
+                    lending_balance=record.lending_balance,
+                    borrowing_balance=record.borrowing_balance,
+                    balance_limit=record.balance_limit,
+                    lending_change=lending_change,
+                    borrowing_change=borrowing_change,
+                )
             )
-            for record in margin_records
-        ]
 
         # 籌碼集中度摘要
         concentration_summary = None

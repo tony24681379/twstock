@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from api.models.chart import ChartDataResponse
-from api.models.stock import ChipsData, FundamentalInfo, StockDetail, StockHistory, StockListResponse
+from api.models.stock import (
+    ChipsData,
+    FundamentalInfo,
+    StockDetail,
+    StockHistory,
+    StockListResponse,
+)
 from api.services.stock_service import StockService
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
@@ -52,8 +58,7 @@ async def list_stocks(
     total = chip_weight + tech_weight + fund_weight
     if abs(total - 1.0) > 0.01:
         raise HTTPException(
-            status_code=400,
-            detail=f"權重總和必須為 1.0（當前: {total:.2f}）"
+            status_code=400, detail=f"權重總和必須為 1.0（當前: {total:.2f}）"
         )
 
     # 驗證參數
@@ -79,8 +84,14 @@ async def list_stocks(
 
     try:
         items, pagination = await StockService.get_stock_list(
-            session, sort_by, order, limit, offset,
-            chip_weight, tech_weight, fund_weight  # 傳遞權重（籌碼 + 技術 + 基本面）
+            session,
+            sort_by,
+            order,
+            limit,
+            offset,
+            chip_weight,
+            tech_weight,
+            fund_weight,  # 傳遞權重（籌碼 + 技術 + 基本面）
         )
 
         # 設定快取標頭（資料每小時更新一次）
