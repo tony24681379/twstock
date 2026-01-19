@@ -65,6 +65,22 @@ export default function StockDetailPage() {
     }
   }, [stockId, period])  // 移除 enabledIndicators 依賴，指標在前端計算
 
+  // 更新瀏覽器標題
+  useEffect(() => {
+    // 保存原始標題
+    const originalTitle = document.title
+
+    if (detail) {
+      // 設定為股票代號和名稱
+      document.title = `${detail.basic_info.stock_id} ${detail.basic_info.name} - 台股籌碼集中度儀表板`
+    }
+
+    // 組件卸載時恢復原標題
+    return () => {
+      document.title = originalTitle
+    }
+  }, [detail])
+
   // 更新 URL 參數
   useEffect(() => {
     const params: Record<string, string> = {}
