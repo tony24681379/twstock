@@ -1,0 +1,47 @@
+# Twstock Terraform 配置範例
+#
+# 複製此文件為 terraform.tfvars 並填入實際值
+# cp terraform.tfvars.example terraform.tfvars
+
+# ============================================================
+# GCP 基本配置
+# ============================================================
+
+project_id = "your-gcp-project-id"  # 例如："twstock-prod"
+region     = "asia-east1"            # GCP 區域（台灣）
+
+# ============================================================
+# 資料庫與 Redis 連線
+# ============================================================
+
+# Neon PostgreSQL 連線字串
+# 取得方式：https://console.neon.tech → 專案 → Connection Details
+database_url = "postgresql+asyncpg://user:password@ep-xxx.aws.neon.tech/twstock"
+
+# Upstash Redis 連線字串
+# 取得方式：https://console.upstash.com → Database → REST API → Redis URL
+redis_url = "redis://default:password@apn1-xxx.upstash.io:6379"
+
+# ============================================================
+# API Cloud Run 配置
+# ============================================================
+
+api_image_tag     = "latest"  # Docker 映像標籤
+api_cpu           = "2"       # CPU 核心數（1, 2, 4）
+api_memory        = "2Gi"     # 記憶體（512Mi, 1Gi, 2Gi, 4Gi）
+api_min_instances = 0         # 最小實例數（0 = 完全縮減至零）
+api_max_instances = 10        # 最大實例數
+
+# ============================================================
+# CORS 設定
+# ============================================================
+
+# 允許的來源（"*" 表示所有來源）
+# 正式環境建議設定為前端 URL
+allowed_origins = "*"
+
+# ============================================================
+# 前端配置
+# ============================================================
+
+enable_frontend_cdn = true  # 是否啟用 CDN
