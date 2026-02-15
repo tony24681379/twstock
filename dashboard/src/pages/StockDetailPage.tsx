@@ -8,6 +8,7 @@ import { TechnicalCard } from '../components/TechnicalCard'
 import IndicatorCharts from '../components/IndicatorCharts'
 import IndicatorToggles from '../components/IndicatorToggles'
 import PeriodSelector from '../components/PeriodSelector'
+import { AlertDetailCard } from '../components/AlertDetailCard'
 import { fetchChartData, fetchStockDetail, fetchStockFundamental, fetchStockHistory, type ChartData } from '../lib/api'
 import { getChangeColorClass, getRetailChangeColorClass } from '../lib/colorUtils'
 import { IndicatorCalculator } from '../lib/indicators'
@@ -202,6 +203,11 @@ export default function StockDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 警示卡片（注意股/處置股） */}
+      {detail.alert_status && (
+        <AlertDetailCard alertStatus={detail.alert_status} stockId={stockId || ''} />
+      )}
 
       {/* K 線圖區域 */}
       {chartData && (

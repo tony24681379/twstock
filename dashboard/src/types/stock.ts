@@ -5,10 +5,37 @@ export interface ChipSignal {
   description?: string
 }
 
+export interface AlertStatus {
+  is_attention_stock: boolean
+  is_disposal_stock: boolean
+
+  // 注意股詳情
+  attention_count?: number
+  attention_reason?: string
+  attention_date?: string
+
+  // 處置股詳情
+  disposal_type?: string
+  disposal_announced_date?: string
+  disposal_start_date?: string
+  disposal_end_date?: string
+  disposal_condition?: string
+  disposal_measure?: string
+  disposal_content?: string
+
+  // 系統預警
+  system_warning: boolean
+  warning_score: number
+  warning_reasons: string[]
+}
+
 export interface StockListItem {
   stock_id: string
   name: string
   close_price: number
+
+  // 警示狀態（新增）
+  alert_status?: AlertStatus
 
   // 三種強度（籌碼 + 技術 + 基本面）- 原始分數（可為負數）
   chip_strength: number        // -25 to +89（原始分數）
@@ -83,6 +110,9 @@ export interface ConcentrationSummary {
 export interface StockDetail {
   basic_info: BasicInfo
   price_info: PriceInfo
+
+  // 警示狀態（新增）
+  alert_status?: AlertStatus
 
   // 訊號列表
   chip_signals: ChipSignal[]
