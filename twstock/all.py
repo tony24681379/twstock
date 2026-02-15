@@ -255,60 +255,100 @@ class All:
             print(f"\n   ✓ API 更新完成！成功: {updated_count} 失敗: {failed_count}")
             print(f"   耗時: {int(update_elapsed/60)}分{int(update_elapsed%60)}秒")
 
-        # 步驟3.5: 批次更新月營收資料
-        print(f"\n📈 批次更新所有股票的月營收資料...")
-        revenue_start_time = time.time()
+        # 步驟3.5: 批次更新月營收資料（智能檢查）
+        print(f"\n📈 批次更新股票月營收資料...")
 
-        MAX_REVENUE_WORKERS = int(os.getenv("MAX_API_WORKERS", "10"))
-        revenue_semaphore = asyncio.Semaphore(MAX_REVENUE_WORKERS)
-
-        async def update_monthly_revenue(sid):
-            """更新單支股票的月營收資料"""
-            async with revenue_semaphore:
-                try:
-                    if hasattr(self.fetcher, "fetch_monthly_revenue"):
-                        await self.fetcher.fetch_monthly_revenue(
-                            sid, months=12, save_to_db=True
-                        )
-                        return sid, True
-                    else:
-                        return sid, False
-                except Exception as e:
-                    # 忽略錯誤，某些股票可能沒有月營收資料
-                    return sid, False
-
-        # 創建月營收更新任務（所有股票）
-        revenue_tasks = [update_monthly_revenue(sid) for sid in all_stock_ids]
-
-        print(f"   並發更新數: {MAX_REVENUE_WORKERS}")
-
-        revenue_updated_count = 0
-        revenue_failed_count = 0
-
-        for task in asyncio.as_completed(revenue_tasks):
-            sid, success = await task
-            if success:
-                revenue_updated_count += 1
-            else:
-                revenue_failed_count += 1
-
-            # 進度顯示
-            if revenue_updated_count % 50 == 0:
-                elapsed = time.time() - revenue_start_time
-                speed = revenue_updated_count / elapsed if elapsed > 0 else 0
-                remaining = total_stocks - revenue_updated_count - revenue_failed_count
-                eta = remaining / speed if speed > 0 else 0
-                print(
-                    f"   月營收更新進度: [{revenue_updated_count + revenue_failed_count}/{total_stocks}] "
-                    f"成功: {revenue_updated_count} - "
-                    f"速度: {speed:.2f} 支/秒 - 預估剩餘: {int(eta/60)}分{int(eta%60)}秒"
+        # ⭐ 新增：批次檢查哪些股票需要更新
+        monthly_revenue_needs_update_map = {}
+        if hasattr(self.fetcher, "db_manager") and self.fetcher.db_manager:
+            print(f"🔍 批次檢查月營收更新狀態...")
+            monthly_revenue_needs_update_map = (
+                await self.fetcher.db_manager.bulk_check_monthly_revenue_needs_update(
+                    all_stock_ids
                 )
+            )
 
-        revenue_elapsed = time.time() - revenue_start_time
-        print(
-            f"\n   ✓ 月營收更新完成！成功: {revenue_updated_count} 跳過: {revenue_failed_count}"
-        )
-        print(f"   耗時: {int(revenue_elapsed/60)}分{int(revenue_elapsed%60)}秒")
+            needs_update_count = sum(
+                1 for v in monthly_revenue_needs_update_map.values() if v
+            )
+            print(
+                f"   ✓ {needs_update_count}/{total_stocks} 支股票需要從 API 更新月營收"
+            )
+            print(
+                f"   ✓ {total_stocks - needs_update_count}/{total_stocks} 支股票月營收已是最新"
+            )
+
+        # ⭐ 修改：只更新需要更新的股票
+        stocks_need_revenue_update = [
+            sid
+            for sid, needs_update in monthly_revenue_needs_update_map.items()
+            if needs_update
+        ]
+
+        if stocks_need_revenue_update:
+            print(
+                f"\n📡 更新需要從 API 取得的 {len(stocks_need_revenue_update)} 支股票月營收..."
+            )
+            revenue_start_time = time.time()
+
+            MAX_REVENUE_WORKERS = int(os.getenv("MAX_API_WORKERS", "10"))
+            revenue_semaphore = asyncio.Semaphore(MAX_REVENUE_WORKERS)
+
+            async def update_monthly_revenue(sid):
+                """更新單支股票的月營收資料"""
+                async with revenue_semaphore:
+                    try:
+                        if hasattr(self.fetcher, "fetch_monthly_revenue"):
+                            await self.fetcher.fetch_monthly_revenue(
+                                sid, months=12, save_to_db=True
+                            )
+                            return sid, True
+                        else:
+                            return sid, False
+                    except Exception as e:
+                        # 忽略錯誤，某些股票可能沒有月營收資料
+                        return sid, False
+
+            # ⭐ 修改：只為需要更新的股票創建任務
+            revenue_tasks = [
+                update_monthly_revenue(sid) for sid in stocks_need_revenue_update
+            ]
+
+            print(f"   並發更新數: {MAX_REVENUE_WORKERS}")
+
+            revenue_updated_count = 0
+            revenue_failed_count = 0
+
+            for task in asyncio.as_completed(revenue_tasks):
+                sid, success = await task
+                if success:
+                    revenue_updated_count += 1
+                else:
+                    revenue_failed_count += 1
+
+                # 進度顯示
+                if revenue_updated_count % 50 == 0:
+                    elapsed = time.time() - revenue_start_time
+                    speed = revenue_updated_count / elapsed if elapsed > 0 else 0
+                    remaining = (
+                        len(stocks_need_revenue_update)
+                        - revenue_updated_count
+                        - revenue_failed_count
+                    )
+                    eta = remaining / speed if speed > 0 else 0
+                    print(
+                        f"   月營收更新進度: [{revenue_updated_count + revenue_failed_count}/{len(stocks_need_revenue_update)}] "
+                        f"成功: {revenue_updated_count} - "
+                        f"速度: {speed:.2f} 支/秒 - 預估剩餘: {int(eta/60)}分{int(eta%60)}秒"
+                    )
+
+            revenue_elapsed = time.time() - revenue_start_time
+            print(
+                f"\n   ✓ 月營收更新完成！成功: {revenue_updated_count} 失敗: {revenue_failed_count}"
+            )
+            print(f"   耗時: {int(revenue_elapsed/60)}分{int(revenue_elapsed%60)}秒")
+        else:
+            print(f"   ✓ 所有股票月營收已是最新，跳過更新")
 
         # 步驟4: 批次載入所有股票資料（包含剛更新的）
         print(f"\n📥 批次載入所有股票資料...")
@@ -430,6 +470,37 @@ class All:
             elapsed = time.time() - concentration_start
             print(f"   籌碼集中度處理完成: {len(concentration_data)} 支股票")
             print(f"   耗時: {int(elapsed/60)}分{int(elapsed%60)}秒")
+
+        # 步驟4.7: 檢測警示股/警告股（注意股、處置股）
+        if os.getenv("ENABLE_ALERT_CHECK", "true").lower() == "true":
+            print("\n📢 步驟 4.7: 檢測警示股/警告股...")
+            alert_start = time.time()
+
+            try:
+                from twstock.twse_fetcher import TWSEAlertFetcher
+
+                alert_fetcher = TWSEAlertFetcher()
+
+                # 並行取得官方公告
+                attention_task = alert_fetcher.fetch_attention_stocks()
+                disposal_task = alert_fetcher.fetch_disposal_stocks()
+                attention_stocks, disposal_stocks = await asyncio.gather(
+                    attention_task, disposal_task
+                )
+
+                # 批次更新到資料庫
+                if attention_stocks or disposal_stocks:
+                    await self.fetcher.db_manager.bulk_update_alert_status(
+                        attention_stocks, disposal_stocks
+                    )
+
+                alert_time = time.time() - alert_start
+                print(f"   ✓ 注意股: {len(attention_stocks)} 支")
+                print(f"   ✓ 處置股: {len(disposal_stocks)} 支")
+                print(f"   ⏱️  警示檢測時間: {alert_time:.2f} 秒")
+
+            except Exception as e:
+                print(f"   ⚠️  警示檢測失敗（不影響主流程）: {e}")
 
         # 步驟5: 處理所有股票（統一從批次載入的資料處理）
         print(f"\n🚀 開始分析所有股票...")
@@ -643,6 +714,42 @@ class All:
         total_minutes = int((endTime - startTime) / 60)
         total_seconds = int((endTime - startTime) % 60)
         print(f"\n⏱️  總執行時間: {total_minutes}分{total_seconds}秒")
+
+        # ========== 自動清理舊資料 ==========
+        try:
+            # 只在 production 環境執行自動清理
+            environment = os.getenv("ENVIRONMENT", "development")
+            retention_days = int(os.getenv("DATA_RETENTION_DAYS", "250"))
+
+            if environment == "production" and retention_days > 0:
+                print("🗑️  開始自動清理舊資料...")
+                # 檢查是否有 db_manager
+                if hasattr(self.fetcher, "db_manager") and self.fetcher.db_manager:
+                    cleanup_result = await self.fetcher.db_manager.auto_cleanup_old_data(
+                        retention_days=retention_days, vacuum=True  # 自動執行 VACUUM
+                    )
+                else:
+                    print("   ⚠️  資料庫管理器未初始化，跳過清理")
+                    cleanup_result = {"status": "skipped", "reason": "No db_manager"}
+
+                if cleanup_result.get("status") == "completed":
+                    total_deleted = sum(
+                        v
+                        for v in cleanup_result.get("deleted_counts", {}).values()
+                        if isinstance(v, int)
+                    )
+                    print(f"✅ 自動清理完成，刪除 {total_deleted:,} 行資料")
+                else:
+                    print(
+                        f"⏭️  自動清理跳過：{cleanup_result.get('reason', 'unknown')}"
+                    )
+            else:
+                print(f"⏭️  自動清理跳過（環境：{environment}，保留天數：{retention_days}）")
+
+        except Exception as e:
+            # 清理失敗不影響主流程
+            print(f"❌ 自動清理失敗（不影響主流程）: {e}")
+        # =======================================
 
     def prepare_concentration_excel(self, concentration_data):
         """將籌碼集中度數據轉換為 Excel 格式（顯示週變化量）"""

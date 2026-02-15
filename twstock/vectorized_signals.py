@@ -55,6 +55,18 @@ class SignalScore:
     NEW_HIGH_60 = 12
     NEW_LOW_60 = -12
 
+    # 極端漲跌訊號（基本）
+    LIMIT_DOWN = -30      # 跌停板
+    LIMIT_UP = 30         # 漲停板
+    BIG_DROP = -20        # 大跌
+    BIG_RISE = 20         # 大漲
+
+    # 極端漲跌訊號（進階）
+    OPEN_LIMIT_DOWN = -35  # 開盤跌停
+    CONSECUTIVE_LIMIT_DOWN = -50  # 連續跌停
+    LIMIT_DOWN_HEAVY_VOLUME = -40  # 跌停爆量
+    LIMIT_DOWN_BREAK = 10  # 跌停開板
+
 
 # ============================================================================
 # 訊號類型常數與時效性設定
@@ -71,7 +83,7 @@ CROSSOVER_DISPLAY_DAYS = 5
 # - crossover: 一次性事件，觸發後顯示5天後過期
 # - state: 持續狀態，每天驗證條件，失效立即移除
 SIGNAL_TYPE_MAP = {
-    # === 交叉/事件型訊號（10個）- 5天顯示期限 ===
+    # === 交叉/事件型訊號（18個）- 5天顯示期限 ===
     "黃金交叉": SIGNAL_TYPE_CROSSOVER,  # MA5 向上穿越 MA20
     "死亡交叉": SIGNAL_TYPE_CROSSOVER,  # MA5 向下跌破 MA20
     "站上季線": SIGNAL_TYPE_CROSSOVER,  # 收盤價向上穿越 MA60
@@ -82,6 +94,16 @@ SIGNAL_TYPE_MAP = {
     "長黑吞噬": SIGNAL_TYPE_CROSSOVER,  # 跌幅<-3%, 黑K吞噬前K
     "跳空向上": SIGNAL_TYPE_CROSSOVER,  # 缺口+漲幅>3%+量增
     "跳空向下": SIGNAL_TYPE_CROSSOVER,  # 缺口+跌幅<-3%
+    # 極端漲跌訊號（基本）
+    "跌停板": SIGNAL_TYPE_CROSSOVER,  # 收盤=最低 且 跌幅<=-9.5%
+    "漲停板": SIGNAL_TYPE_CROSSOVER,  # 收盤=最高 且 漲幅>=+9.5%
+    "大跌警示": SIGNAL_TYPE_CROSSOVER,  # 跌幅<=-7%
+    "大漲訊號": SIGNAL_TYPE_CROSSOVER,  # 漲幅>=+7%
+    # 極端漲跌訊號（進階）
+    "開盤跌停": SIGNAL_TYPE_CROSSOVER,  # 開盤價=昨收×0.9
+    "連續跌停": SIGNAL_TYPE_CROSSOVER,  # 連續2天以上跌停
+    "跌停爆量": SIGNAL_TYPE_CROSSOVER,  # 跌停+成交量>20日均量×2
+    "跌停開板": SIGNAL_TYPE_CROSSOVER,  # 盤中跌停後開板
     # === 狀態型訊號（9個）- 持續驗證有效性 ===
     "三線合一向上": SIGNAL_TYPE_STATE,  # MA5/10/20 糾結後向上穿破
     "三線合一向下": SIGNAL_TYPE_STATE,  # MA5/10/20 糾結後向下穿破
@@ -127,12 +149,17 @@ class VectorizedSignalDetector:
             1      2330    多頭排列       True     18  2024-01-15
             2      2454    KD向上        True     12  2024-01-15
         """
+        # 過濾掉資料不足的股票（至少需要 3 筆資料）
+        stock_counts = df.groupby("stock_id").size()
+        valid_stocks = stock_counts[stock_counts >= 3].index
+        df_valid = df[df["stock_id"].isin(valid_stocks)]
+
         # 取得最新和前一筆資料
-        latest = df.groupby("stock_id").last().reset_index()
-        prev = df.groupby("stock_id").nth(-2).reset_index()
+        latest = df_valid.groupby("stock_id").last().reset_index()
+        prev = df_valid.groupby("stock_id").nth(-2).reset_index()
 
         # 取得前前一筆（用於趨勢判斷）
-        prev2 = df.groupby("stock_id").nth(-3).reset_index()
+        prev2 = df_valid.groupby("stock_id").nth(-3).reset_index()
 
         signal_results = []
 
@@ -423,6 +450,142 @@ class VectorizedSignalDetector:
             )
         )
 
+        # ========== 極端漲跌訊號（8 個）==========
+
+        # 計算漲跌幅百分比（已經在第 304 行計算過 price_change_pct，直接使用）
+        # price_change_pct = (latest["close"] - prev["close"]) / prev["close"] * 100
+
+        # 22. 跌停板（收盤價 = 最低價 且 跌幅 <= -9.5%）
+        limit_down = (
+            (latest["close"] == latest["low"]) &
+            (price_change_pct <= -9.5)
+        )
+        signal_results.append(
+            latest[limit_down][["stock_id", "date"]].assign(
+                signal_name="跌停板",
+                triggered=True,
+                score=SignalScore.LIMIT_DOWN,
+            )
+        )
+
+        # 23. 漲停板（收盤價 = 最高價 且 漲幅 >= +9.5%）
+        limit_up = (
+            (latest["close"] == latest["high"]) &
+            (price_change_pct >= 9.5)
+        )
+        signal_results.append(
+            latest[limit_up][["stock_id", "date"]].assign(
+                signal_name="漲停板",
+                triggered=True,
+                score=SignalScore.LIMIT_UP,
+            )
+        )
+
+        # 24. 大跌警示（跌幅 <= -7%，但未跌停）
+        big_drop = (
+            (price_change_pct <= -7.0) &
+            ~limit_down  # 排除已經跌停的（避免重複計分）
+        )
+        signal_results.append(
+            latest[big_drop][["stock_id", "date"]].assign(
+                signal_name="大跌警示",
+                triggered=True,
+                score=SignalScore.BIG_DROP,
+            )
+        )
+
+        # 25. 大漲訊號（漲幅 >= +7%，但未漲停）
+        big_rise = (
+            (price_change_pct >= 7.0) &
+            ~limit_up  # 排除已經漲停的（避免重複計分）
+        )
+        signal_results.append(
+            latest[big_rise][["stock_id", "date"]].assign(
+                signal_name="大漲訊號",
+                triggered=True,
+                score=SignalScore.BIG_RISE,
+            )
+        )
+
+        # ========== 進階極端漲跌訊號（4 個）==========
+
+        # 26. 開盤跌停（開盤價 = 昨收 × 0.9 且維持跌停）
+        # 理論跌停價 = 昨收 × 0.9
+        limit_down_price = prev["close"] * 0.9
+
+        # 判斷開盤跌停：開盤價約等於跌停價（容許 0.5% 誤差）且收盤跌停
+        open_limit_down = (
+            (abs(latest["open"] - limit_down_price) / limit_down_price < 0.005) &
+            limit_down  # 且收盤也是跌停
+        )
+        signal_results.append(
+            latest[open_limit_down][["stock_id", "date"]].assign(
+                signal_name="開盤跌停",
+                triggered=True,
+                score=SignalScore.OPEN_LIMIT_DOWN,
+            )
+        )
+
+        # 27. 連續跌停（今天跌停 且 昨天也跌停）
+        # 計算昨天的跌幅
+        prev2_close = prev2["close"]  # 前前日收盤（已在第 135 行取得）
+        prev_change_pct = (prev["close"] - prev2_close) / prev2_close * 100
+
+        # 昨天是否跌停
+        prev_limit_down = (
+            (prev["close"] == prev["low"]) &
+            (prev_change_pct <= -9.5)
+        )
+
+        # 連續跌停：今天跌停 且 昨天也跌停
+        consecutive_limit_down = limit_down & prev_limit_down
+        signal_results.append(
+            latest[consecutive_limit_down][["stock_id", "date"]].assign(
+                signal_name="連續跌停",
+                triggered=True,
+                score=SignalScore.CONSECUTIVE_LIMIT_DOWN,
+            )
+        )
+
+        # 28. 跌停爆量（跌停 + 成交量 > 20日均量 × 2）
+        # 計算 20 日平均量
+        volume_ma20 = df.groupby("stock_id")["volume"].transform(
+            lambda x: x.rolling(window=20, min_periods=1).mean()
+        )
+        latest_volume_ma20 = (
+            df.groupby("stock_id")
+            .apply(lambda g: volume_ma20[g.index[-1]])
+            .reset_index(name="volume_ma20")
+        )
+        latest = latest.merge(latest_volume_ma20, on="stock_id", how="left")
+
+        limit_down_heavy_volume = (
+            limit_down &
+            (latest["volume"] > latest["volume_ma20"] * 2)
+        )
+        signal_results.append(
+            latest[limit_down_heavy_volume][["stock_id", "date"]].assign(
+                signal_name="跌停爆量",
+                triggered=True,
+                score=SignalScore.LIMIT_DOWN_HEAVY_VOLUME,
+            )
+        )
+
+        # 29. 跌停開板（盤中跌停後開板：最低 = 跌停價但收盤 > 跌停）
+        # 判斷：最低價觸及跌停價（昨收 × 0.9），但收盤價高於跌停價
+        limit_down_break = (
+            (abs(latest["low"] - limit_down_price) / limit_down_price < 0.005) &  # 最低碰到跌停
+            (latest["close"] > limit_down_price * 1.01) &  # 但收盤高於跌停價 1%
+            ~limit_down  # 且收盤未跌停
+        )
+        signal_results.append(
+            latest[limit_down_break][["stock_id", "date"]].assign(
+                signal_name="跌停開板",
+                triggered=True,
+                score=SignalScore.LIMIT_DOWN_BREAK,
+            )
+        )
+
         # 合併所有訊號
         all_signals = pd.concat(signal_results, ignore_index=True)
 
@@ -471,9 +634,10 @@ class VectorizedSignalDetector:
             .reset_index()
         )
 
-        # 正規化到 0-100（理論範圍 -120 到 +164）
-        min_score = -120
-        max_score = 164
+        # 正規化到 0-100（理論範圍 -170 到 +194）
+        # 新增極端漲跌訊號後，最低可達 -170（連續跌停+其他負分），最高可達 +194（漲停+其他正分）
+        min_score = -170
+        max_score = 194
 
         strength["normalized_score"] = (
             (((strength["raw_score"] - min_score) / (max_score - min_score)) * 100)
@@ -583,9 +747,14 @@ class VectorizedSignalDetector:
             >>> history = pd.DataFrame(...)  # 從資料庫載入
             >>> new_crossovers = VectorizedSignalDetector.detect_crossover_signals(df, history)
         """
+        # 過濾掉資料不足的股票（至少需要 2 筆資料）
+        stock_counts = df.groupby("stock_id").size()
+        valid_stocks = stock_counts[stock_counts >= 2].index
+        df_valid = df[df["stock_id"].isin(valid_stocks)]
+
         # 取得最新和前一筆資料
-        latest = df.groupby("stock_id").last().reset_index()
-        prev = df.groupby("stock_id").nth(-2).reset_index()
+        latest = df_valid.groupby("stock_id").last().reset_index()
+        prev = df_valid.groupby("stock_id").nth(-2).reset_index()
 
         new_signals = []
 
@@ -739,6 +908,131 @@ class VectorizedSignalDetector:
                 )
             )
 
+        # ========== 極端漲跌訊號（8 個）==========
+
+        # 11. 跌停板（收盤價 = 最低價 且 跌幅 <= -9.5%）
+        limit_down = (latest["close"] == latest["low"]) & (pct_change <= -9.5)
+        if limit_down.any():
+            new_signals.append(
+                latest[limit_down][["stock_id", "date"]].assign(
+                    signal_name="跌停板",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_DOWN,
+                    trigger_date=latest[limit_down]["date"],
+                )
+            )
+
+        # 12. 漲停板（收盤價 = 最高價 且 漲幅 >= +9.5%）
+        limit_up = (latest["close"] == latest["high"]) & (pct_change >= 9.5)
+        if limit_up.any():
+            new_signals.append(
+                latest[limit_up][["stock_id", "date"]].assign(
+                    signal_name="漲停板",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_UP,
+                    trigger_date=latest[limit_up]["date"],
+                )
+            )
+
+        # 13. 大跌警示（跌幅 <= -7%，但未跌停）
+        big_drop = (pct_change <= -7.0) & ~limit_down
+        if big_drop.any():
+            new_signals.append(
+                latest[big_drop][["stock_id", "date"]].assign(
+                    signal_name="大跌警示",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.BIG_DROP,
+                    trigger_date=latest[big_drop]["date"],
+                )
+            )
+
+        # 14. 大漲訊號（漲幅 >= +7%，但未漲停）
+        big_rise = (pct_change >= 7.0) & ~limit_up
+        if big_rise.any():
+            new_signals.append(
+                latest[big_rise][["stock_id", "date"]].assign(
+                    signal_name="大漲訊號",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.BIG_RISE,
+                    trigger_date=latest[big_rise]["date"],
+                )
+            )
+
+        # ========== 進階極端漲跌訊號（4 個）==========
+
+        # 15. 開盤跌停（開盤價 = 昨收 × 0.9 且維持跌停）
+        limit_down_price = prev["close"] * 0.9
+        open_limit_down = (
+            (abs(latest["open"] - limit_down_price) / limit_down_price < 0.005)
+            & limit_down
+        )
+        if open_limit_down.any():
+            new_signals.append(
+                latest[open_limit_down][["stock_id", "date"]].assign(
+                    signal_name="開盤跌停",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.OPEN_LIMIT_DOWN,
+                    trigger_date=latest[open_limit_down]["date"],
+                )
+            )
+
+        # 16. 連續跌停（今天跌停 且 昨天也跌停）
+        # 取得前前一日資料
+        prev2 = df.groupby("stock_id").nth(-3).reset_index()
+        prev_pct_change = (prev["close"] - prev2["close"]) / prev2["close"] * 100
+        prev_limit_down = (prev["close"] == prev["low"]) & (prev_pct_change <= -9.5)
+        consecutive_limit_down = limit_down & prev_limit_down
+        if consecutive_limit_down.any():
+            new_signals.append(
+                latest[consecutive_limit_down][["stock_id", "date"]].assign(
+                    signal_name="連續跌停",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.CONSECUTIVE_LIMIT_DOWN,
+                    trigger_date=latest[consecutive_limit_down]["date"],
+                )
+            )
+
+        # 17. 跌停爆量（跌停 + 成交量 > 20日均量 × 2）
+        # 計算 20 日平均量
+        volume_ma20 = df.groupby("stock_id")["volume"].transform(
+            lambda x: x.rolling(window=20, min_periods=1).mean()
+        )
+        latest_volume_ma20 = (
+            df.groupby("stock_id")
+            .apply(lambda g: volume_ma20[g.index[-1]], include_groups=False)
+            .reset_index(name="volume_ma20")
+        )
+        latest = latest.merge(latest_volume_ma20, on="stock_id", how="left")
+
+        limit_down_heavy_volume = limit_down & (
+            latest["volume"] > latest["volume_ma20"] * 2
+        )
+        if limit_down_heavy_volume.any():
+            new_signals.append(
+                latest[limit_down_heavy_volume][["stock_id", "date"]].assign(
+                    signal_name="跌停爆量",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_DOWN_HEAVY_VOLUME,
+                    trigger_date=latest[limit_down_heavy_volume]["date"],
+                )
+            )
+
+        # 18. 跌停開板（盤中跌停後開板：最低 = 跌停價但收盤 > 跌停）
+        limit_down_break = (
+            (abs(latest["low"] - limit_down_price) / limit_down_price < 0.005)
+            & (latest["close"] > limit_down_price * 1.01)
+            & ~limit_down
+        )
+        if limit_down_break.any():
+            new_signals.append(
+                latest[limit_down_break][["stock_id", "date"]].assign(
+                    signal_name="跌停開板",
+                    signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_DOWN_BREAK,
+                    trigger_date=latest[limit_down_break]["date"],
+                )
+            )
+
         # 合併所有新觸發的訊號
         if not new_signals:
             return pd.DataFrame(
@@ -829,9 +1123,14 @@ class VectorizedSignalDetector:
             >>> validated = VectorizedSignalDetector.validate_state_signals(df, history)
             >>> print(f"有效: {(validated['is_valid']).sum()}, 失效: {(~validated['is_valid']).sum()}")
         """
+        # 過濾掉資料不足的股票（至少需要 2 筆資料）
+        stock_counts = df.groupby("stock_id").size()
+        valid_stocks = stock_counts[stock_counts >= 2].index
+        df_valid = df[df["stock_id"].isin(valid_stocks)]
+
         # 取得最新資料
-        latest = df.groupby("stock_id").last().reset_index()
-        prev = df.groupby("stock_id").nth(-2).reset_index()
+        latest = df_valid.groupby("stock_id").last().reset_index()
+        prev = df_valid.groupby("stock_id").nth(-2).reset_index()
 
         validated_signals = []
 

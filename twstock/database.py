@@ -1,9 +1,12 @@
 import asyncio
 import hashlib
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 from sqlalchemy import (
@@ -300,6 +303,49 @@ class StockSignalHistory(Base):
         Index("idx_signal_history_type", "signal_type"),
         Index("idx_signal_history_valid", "last_valid_date"),
         Index("idx_signal_history_stock_name", "stock_id", "signal_name"),
+    )
+
+
+class StockAlertStatus(Base):
+    """股票警示狀態表"""
+
+    __tablename__ = "stock_alert_status"
+
+    # 主鍵
+    stock_id = Column(String, primary_key=True, index=True, comment="股票代號")
+
+    # 注意股資訊
+    is_attention_stock = Column(Boolean, default=False, comment="是否為注意股")
+    attention_count = Column(Integer, comment="累計注意次數")
+    attention_reason = Column(String, comment="注意交易資訊")
+    attention_date = Column(DateTime, comment="最近注意日期")
+
+    # 處置股資訊
+    is_disposal_stock = Column(Boolean, default=False, comment="是否為處置股")
+    disposal_announced_date = Column(DateTime, comment="處置公布日期")
+    disposal_start_date = Column(DateTime, comment="處置起始日期")
+    disposal_end_date = Column(DateTime, comment="處置迄日")
+    disposal_type = Column(String, comment="處置類型（第一次處置/第二次處置）")
+    disposal_condition = Column(String, comment="處置條件（連續三次等）")
+    disposal_measure = Column(String, comment="處置措施")
+    disposal_content = Column(String, comment="處置內容（完整說明）")
+
+    # 系統預警（輔助）
+    system_warning = Column(Boolean, default=False, comment="系統預警標記")
+    warning_reasons = Column(JSONB, comment="預警原因列表")
+    warning_score = Column(Integer, default=0, comment="風險分數 0-100")
+
+    # 元數據
+    last_checked_at = Column(DateTime, comment="最後檢查時間")
+    updated_at = Column(
+        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新時間"
+    )
+    created_at = Column(DateTime, default=datetime.now, comment="建立時間")
+
+    __table_args__ = (
+        Index("idx_alert_attention", "is_attention_stock"),
+        Index("idx_alert_disposal", "is_disposal_stock"),
+        Index("idx_alert_updated", "updated_at"),
     )
 
 
@@ -1073,6 +1119,100 @@ class DatabaseManager:
             # 如果批次檢查失敗，回退到全部需要更新
             return {stock_id: True for stock_id in stock_ids}
 
+    async def bulk_check_monthly_revenue_needs_update(
+        self, stock_ids: List[str]
+    ) -> Dict[str, bool]:
+        """
+        批次檢查多支股票的月營收是否需要更新
+
+        Args:
+            stock_ids: 股票代碼列表
+
+        Returns:
+            Dict[stock_id, needs_update]:
+            - True: 需要從 API 更新
+            - False: 資料庫已有最新資料
+
+        判斷邏輯:
+            1. DB 沒有資料 → 需要更新
+            2. 最新月份 < 當月 → 需要更新（例如 DB 有 2025/12，現在是 2026/01）
+            3. 已在當月且今日檢查過 → 不需要更新（冪等性）
+        """
+        stock_ids = [sid.lower() for sid in stock_ids]
+        result = {}
+
+        try:
+            async with self.get_session() as session:
+                # 一次查詢所有股票最新的月營收記錄（避免 N+1）
+                latest_result = await session.execute(
+                    text("""
+                        WITH latest_revenue AS (
+                            SELECT
+                                stock_id,
+                                year,
+                                month,
+                                updated_at,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY stock_id
+                                    ORDER BY year DESC, month DESC
+                                ) as rn
+                            FROM stock_monthly_revenue
+                            WHERE stock_id = ANY(:stock_ids)
+                        )
+                        SELECT stock_id, year, month, updated_at
+                        FROM latest_revenue
+                        WHERE rn = 1
+                    """),
+                    {"stock_ids": stock_ids},
+                )
+
+                latest_data = {
+                    row.stock_id: {
+                        "year": row.year,
+                        "month": row.month,
+                        "updated_at": row.updated_at,
+                    }
+                    for row in latest_result.fetchall()
+                }
+
+                # 判斷邏輯
+                current_year = datetime.now().year
+                current_month = datetime.now().month
+                today = date.today()
+
+                for stock_id in stock_ids:
+                    if stock_id not in latest_data:
+                        # DB 沒有資料 → 需要更新
+                        result[stock_id] = True
+                        continue
+
+                    db_year = latest_data[stock_id]["year"]
+                    db_month = latest_data[stock_id]["month"]
+                    updated_at = latest_data[stock_id]["updated_at"]
+
+                    # 檢查是否已是當月最新資料
+                    if db_year == current_year and db_month == current_month:
+                        # 已在當月更新過，檢查是否今天已經檢查過（避免重複請求）
+                        if updated_at and updated_at.date() >= today:
+                            # 今天已經檢查過 → 不需要更新
+                            result[stock_id] = False
+                            continue
+
+                    # 判斷是否需要更新（考慮月份差異）
+                    # 例如：DB 有 2025/12，現在是 2026/01 → 需要更新
+                    db_month_total = db_year * 12 + db_month
+                    current_month_total = current_year * 12 + current_month
+
+                    # 最新月份 < 當月 → 需要更新
+                    result[stock_id] = db_month_total < current_month_total
+
+                return result
+
+        except Exception as e:
+            print(f"⚠️  批次檢查月營收狀態失敗: {e}")
+            # 查詢失敗時，保守起見，全部標記為需要更新
+            return {stock_id: True for stock_id in stock_ids}
+
     async def bulk_load_daily_data(
         self, stock_ids: List[str], days: int = 490
     ) -> Dict[str, pd.DataFrame]:
@@ -1598,6 +1738,223 @@ class DatabaseManager:
                     insert_params,
                 )
 
+    async def bulk_update_alert_status(
+        self,
+        attention_stocks: List[Dict],
+        disposal_stocks: List[Dict],
+    ):
+        """
+        批次更新警示狀態（UPSERT）
+
+        Args:
+            attention_stocks: 注意股清單 [{'stock_id': '1471', 'count': 3, 'reason': '...', 'date': '2026-01-31'}, ...]
+            disposal_stocks: 處置股清單 [{'stock_id': '1471', 'type': '第一次處置', ...}, ...]
+        """
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                # 1. 更新注意股
+                for stock in attention_stocks:
+                    stock_id = stock['stock_id'].lower()
+                    await session.execute(
+                        text("""
+                            INSERT INTO stock_alert_status
+                            (stock_id, is_attention_stock, attention_count, attention_reason, attention_date,
+                             last_checked_at, updated_at, created_at)
+                            VALUES (:stock_id, true, :count, :reason, :date, :now, :now, :now)
+                            ON CONFLICT (stock_id) DO UPDATE SET
+                                is_attention_stock = true,
+                                attention_count = :count,
+                                attention_reason = :reason,
+                                attention_date = :date,
+                                last_checked_at = :now,
+                                updated_at = :now
+                        """),
+                        {
+                            "stock_id": stock_id,
+                            "count": stock.get('count'),
+                            "reason": stock.get('reason'),
+                            "date": stock.get('date'),
+                            "now": datetime.now(),
+                        },
+                    )
+
+                # 2. 更新處置股
+                for stock in disposal_stocks:
+                    stock_id = stock['stock_id'].lower()
+                    await session.execute(
+                        text("""
+                            INSERT INTO stock_alert_status
+                            (stock_id, is_disposal_stock, disposal_announced_date, disposal_start_date,
+                             disposal_end_date, disposal_type, disposal_condition, disposal_measure,
+                             disposal_content, last_checked_at, updated_at, created_at)
+                            VALUES (:stock_id, true, :announced_date, :start_date, :end_date, :type,
+                                    :condition, :measure, :content, :now, :now, :now)
+                            ON CONFLICT (stock_id) DO UPDATE SET
+                                is_disposal_stock = true,
+                                disposal_announced_date = :announced_date,
+                                disposal_start_date = :start_date,
+                                disposal_end_date = :end_date,
+                                disposal_type = :type,
+                                disposal_condition = :condition,
+                                disposal_measure = :measure,
+                                disposal_content = :content,
+                                last_checked_at = :now,
+                                updated_at = :now
+                        """),
+                        {
+                            "stock_id": stock_id,
+                            "announced_date": stock.get('announced_date'),
+                            "start_date": stock.get('start_date'),
+                            "end_date": stock.get('end_date'),
+                            "type": stock.get('type'),
+                            "condition": stock.get('condition'),
+                            "measure": stock.get('measure'),
+                            "content": stock.get('content'),
+                            "now": datetime.now(),
+                        },
+                    )
+
+                # 3. 清除已移除的警示（將不在清單中的股票標記為 false）
+                attention_ids = [s['stock_id'].lower() for s in attention_stocks]
+                disposal_ids = [s['stock_id'].lower() for s in disposal_stocks]
+
+                if attention_ids or disposal_ids:
+                    # 清除不在注意股清單中的記錄
+                    if attention_ids:
+                        await session.execute(
+                            text("""
+                                UPDATE stock_alert_status
+                                SET is_attention_stock = false,
+                                    attention_count = NULL,
+                                    attention_reason = NULL,
+                                    attention_date = NULL,
+                                    updated_at = :now
+                                WHERE is_attention_stock = true
+                                  AND stock_id <> ALL(:attention_ids)
+                            """),
+                            {"attention_ids": attention_ids, "now": datetime.now()},
+                        )
+
+                    # 清除不在處置股清單中的記錄
+                    if disposal_ids:
+                        await session.execute(
+                            text("""
+                                UPDATE stock_alert_status
+                                SET is_disposal_stock = false,
+                                    disposal_announced_date = NULL,
+                                    disposal_start_date = NULL,
+                                    disposal_end_date = NULL,
+                                    disposal_type = NULL,
+                                    disposal_condition = NULL,
+                                    disposal_measure = NULL,
+                                    disposal_content = NULL,
+                                    updated_at = :now
+                                WHERE is_disposal_stock = true
+                                  AND stock_id <> ALL(:disposal_ids)
+                            """),
+                            {"disposal_ids": disposal_ids, "now": datetime.now()},
+                        )
+
+    async def bulk_update_system_warnings(
+        self,
+        warning_stocks: Dict[str, Dict],
+    ):
+        """
+        批次更新系統預警
+
+        Args:
+            warning_stocks: {stock_id: {'warning_score': 60, 'warning_reasons': ['異常放量', ...]}, ...}
+        """
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                for stock_id, warning_data in warning_stocks.items():
+                    stock_id = stock_id.lower()
+                    await session.execute(
+                        text("""
+                            INSERT INTO stock_alert_status
+                            (stock_id, system_warning, warning_score, warning_reasons,
+                             last_checked_at, updated_at, created_at)
+                            VALUES (:stock_id, true, :score, :reasons, :now, :now, :now)
+                            ON CONFLICT (stock_id) DO UPDATE SET
+                                system_warning = true,
+                                warning_score = :score,
+                                warning_reasons = :reasons,
+                                last_checked_at = :now,
+                                updated_at = :now
+                        """),
+                        {
+                            "stock_id": stock_id,
+                            "score": warning_data.get('warning_score', 0),
+                            "reasons": warning_data.get('warning_reasons', []),
+                            "now": datetime.now(),
+                        },
+                    )
+
+    async def bulk_load_alert_status(
+        self,
+        stock_ids: List[str],
+    ) -> Dict[str, Dict]:
+        """
+        批次載入警示狀態（避免 N+1 查詢）
+
+        Args:
+            stock_ids: 股票代號清單
+
+        Returns:
+            {stock_id: {
+                'is_attention_stock': True,
+                'attention_count': 3,
+                'is_disposal_stock': False,
+                ...
+            }, ...}
+        """
+        if not stock_ids:
+            return {}
+
+        # 統一使用小寫 ID
+        stock_ids = [sid.lower() for sid in stock_ids]
+
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                result = await session.execute(
+                    text("""
+                        SELECT stock_id, is_attention_stock, attention_count, attention_reason,
+                               attention_date, is_disposal_stock, disposal_announced_date,
+                               disposal_start_date, disposal_end_date, disposal_type,
+                               disposal_condition, disposal_measure, disposal_content,
+                               system_warning, warning_score, warning_reasons
+                        FROM stock_alert_status
+                        WHERE stock_id = ANY(:stock_ids)
+                          AND (is_attention_stock = true OR is_disposal_stock = true OR system_warning = true)
+                    """),
+                    {"stock_ids": stock_ids},
+                )
+
+                rows = result.fetchall()
+
+                alert_dict = {}
+                for row in rows:
+                    stock_id = row.stock_id
+                    alert_dict[stock_id] = {
+                        "is_attention_stock": row.is_attention_stock or False,
+                        "attention_count": row.attention_count,
+                        "attention_reason": row.attention_reason,
+                        "attention_date": row.attention_date.isoformat() if row.attention_date else None,
+                        "is_disposal_stock": row.is_disposal_stock or False,
+                        "disposal_announced_date": row.disposal_announced_date.isoformat() if row.disposal_announced_date else None,
+                        "disposal_start_date": row.disposal_start_date.isoformat() if row.disposal_start_date else None,
+                        "disposal_end_date": row.disposal_end_date.isoformat() if row.disposal_end_date else None,
+                        "disposal_type": row.disposal_type,
+                        "disposal_condition": row.disposal_condition,
+                        "disposal_measure": row.disposal_measure,
+                        "disposal_content": row.disposal_content,
+                        "system_warning": row.system_warning or False,
+                        "warning_score": row.warning_score or 0,
+                        "warning_reasons": row.warning_reasons or [],
+                    }
+
+                return alert_dict
+
     async def get_tracker(self, stock_id: str) -> Optional[Dict[str, Any]]:
         """取得股票追蹤狀態"""
         stock_id = stock_id.lower()  # 統一使用小寫 ID
@@ -1608,6 +1965,127 @@ class DatabaseManager:
             )
             row = result.fetchone()
             return dict(row._mapping) if row else None
+
+    async def auto_cleanup_old_data(
+        self, retention_days: int = 250, vacuum: bool = True
+    ) -> Dict[str, Any]:
+        """
+        自動清理超過保留期限的歷史資料（爬蟲完成後調用）
+
+        Args:
+            retention_days: 保留天數（0 表示不清理）
+            vacuum: 是否執行 VACUUM 釋放空間
+
+        Returns:
+            清理結果統計
+        """
+        import os
+        from datetime import datetime, timedelta
+
+        # 環境檢查：只在 production 環境執行
+        environment = os.getenv("ENVIRONMENT", "development")
+        if environment != "production":
+            logger.info(
+                f"⏭️  自動清理跳過（環境：{environment}，只在 production 執行）"
+            )
+            return {
+                "status": "skipped",
+                "reason": f"environment={environment} (只在 production 執行)",
+                "retention_days": retention_days,
+            }
+
+        if retention_days <= 0:
+            logger.info("⏭️  自動清理跳過（retention_days=0，永久保留）")
+            return {
+                "status": "skipped",
+                "reason": "retention_days=0 (永久保留)",
+                "retention_days": retention_days,
+            }
+
+        # 計算截止日期
+        cutoff_date = datetime.now() - timedelta(days=retention_days)
+        logger.info(
+            f"🗑️  開始自動清理舊資料（保留 {retention_days} 天，截止日期：{cutoff_date.date()}）"
+        )
+
+        # 需要清理的表
+        tables_to_cleanup = [
+            "stock_daily",
+            "institutional_investors",
+            "major_investors",
+            "margin_trading",
+            "concentration_data",
+            "stock_technical_indicators",
+        ]
+
+        result = {
+            "status": "completed",
+            "environment": environment,
+            "retention_days": retention_days,
+            "cutoff_date": cutoff_date.isoformat(),
+            "deleted_counts": {},
+            "vacuum": "pending",
+        }
+
+        async with self.async_session_factory() as session:
+            total_deleted = 0
+
+            for table in tables_to_cleanup:
+                try:
+                    # 刪除舊資料
+                    delete_result = await session.execute(
+                        text(
+                            f"""
+                        DELETE FROM {table}
+                        WHERE date < :cutoff_date
+                    """
+                        ),
+                        {"cutoff_date": cutoff_date},
+                    )
+
+                    deleted_count = delete_result.rowcount
+                    result["deleted_counts"][table] = deleted_count
+                    total_deleted += deleted_count
+
+                    if deleted_count > 0:
+                        logger.info(f"  ✅ {table}: 刪除 {deleted_count:,} 行")
+                    else:
+                        logger.debug(f"  ⏭️  {table}: 無需刪除")
+
+                except Exception as e:
+                    logger.error(f"  ❌ {table}: 刪除失敗 - {e}")
+                    result["deleted_counts"][table] = f"error: {str(e)}"
+
+            # 提交刪除
+            await session.commit()
+            logger.info(f"📊 總計刪除 {total_deleted:,} 行資料")
+
+            # VACUUM 釋放磁碟空間
+            if vacuum and total_deleted > 0:
+                logger.info("🧹 執行 VACUUM 釋放磁碟空間...")
+                try:
+                    # 關閉當前 session
+                    await session.close()
+
+                    # 使用新連線執行 VACUUM（需要 AUTOCOMMIT）
+                    async with self.async_engine.connect() as conn:
+                        # 設定為 AUTOCOMMIT 模式（VACUUM 不能在交易中執行）
+                        await conn.execution_options(isolation_level="AUTOCOMMIT")
+                        for table in tables_to_cleanup:
+                            await conn.execute(text(f"VACUUM {table}"))
+                            logger.debug(f"  ✅ VACUUM {table}")
+
+                    result["vacuum"] = "completed"
+                    logger.info("✅ VACUUM 完成")
+
+                except Exception as e:
+                    logger.error(f"❌ VACUUM 失敗: {e}")
+                    result["vacuum"] = f"error: {str(e)}"
+            else:
+                result["vacuum"] = "skipped"
+
+        logger.info(f"✅ 自動清理完成（保留 {retention_days} 天資料）")
+        return result
 
 
 def safe_float(value):

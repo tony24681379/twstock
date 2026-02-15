@@ -170,7 +170,8 @@ class SignalUpdater:
             all_data = self.indicator_engine.calculate_all_indicators(all_data)
 
             # Step 4: 載入現有訊號歷史（用於去重和狀態驗證）
-            history_df = await self._load_signal_history(stock_ids, days=30)
+            # 使用 60 天確保涵蓋所有可能的歷史訊號
+            history_df = await self._load_signal_history(stock_ids, days=60)
 
             # Step 5: 檢測交叉訊號（新觸發的）
             new_crossover_signals = self.signal_detector.detect_crossover_signals(
@@ -442,66 +443,94 @@ class SignalUpdater:
             state_df: 狀態訊號驗證結果 DataFrame
         """
         async with self.db.get_session() as session:
-            # 插入新的交叉訊號
-            if not crossover_df.empty:
-                for _, row in crossover_df.iterrows():
-                    signal = StockSignalHistory(
-                        stock_id=row["stock_id"],
-                        signal_name=row["signal_name"],
-                        signal_type=row["signal_type"],
-                        trigger_date=row["trigger_date"],
-                        last_valid_date=row["trigger_date"],
-                        score=row["score"],
-                    )
-                    session.add(signal)
-                print(f"新增 {len(crossover_df)} 個交叉訊號到歷史表")
-
-            # 更新或插入狀態訊號
-            if not state_df.empty:
-                updated_count = 0
-                inserted_count = 0
-
-                for _, row in state_df.iterrows():
-                    # 查詢現有記錄
+            # 使用 no_autoflush 避免查詢時提前 flush 導致重複插入
+            with session.no_autoflush:
+                # 插入新的交叉訊號
+                if not crossover_df.empty:
+                    # 批次查詢已存在的記錄（避免重複插入）
+                    conditions = [
+                        and_(
+                            StockSignalHistory.stock_id == row["stock_id"],
+                            StockSignalHistory.signal_name == row["signal_name"],
+                            StockSignalHistory.trigger_date == row["trigger_date"],
+                        )
+                        for _, row in crossover_df.iterrows()
+                    ]
                     result = await session.execute(
-                        select(StockSignalHistory).where(
-                            and_(
-                                StockSignalHistory.stock_id == row["stock_id"],
-                                StockSignalHistory.signal_name == row["signal_name"],
-                                StockSignalHistory.trigger_date == row["trigger_date"],
+                        select(
+                            StockSignalHistory.stock_id,
+                            StockSignalHistory.signal_name,
+                            StockSignalHistory.trigger_date,
+                        ).where(or_(*conditions))
+                    )
+                    existing_keys = {
+                        (row.stock_id, row.signal_name, row.trigger_date)
+                        for row in result.all()
+                    }
+
+                # 只插入不存在的記錄
+                new_count = 0
+                for _, row in crossover_df.iterrows():
+                    key = (row["stock_id"], row["signal_name"], row["trigger_date"])
+                    if key not in existing_keys:
+                        signal = StockSignalHistory(
+                            stock_id=row["stock_id"],
+                            signal_name=row["signal_name"],
+                            signal_type=row["signal_type"],
+                            trigger_date=row["trigger_date"],
+                            last_valid_date=row["trigger_date"],
+                            score=row["score"],
+                        )
+                        session.add(signal)
+                        new_count += 1
+                    print(f"新增 {new_count} 個交叉訊號到歷史表（跳過 {len(crossover_df) - new_count} 個重複記錄）")
+
+                # 更新或插入狀態訊號
+                if not state_df.empty:
+                    updated_count = 0
+                    inserted_count = 0
+
+                    for _, row in state_df.iterrows():
+                        # 查詢現有記錄
+                        result = await session.execute(
+                            select(StockSignalHistory).where(
+                                and_(
+                                    StockSignalHistory.stock_id == row["stock_id"],
+                                    StockSignalHistory.signal_name == row["signal_name"],
+                                    StockSignalHistory.trigger_date == row["trigger_date"],
+                                )
                             )
                         )
-                    )
-                    existing = result.scalar_one_or_none()
+                        existing = result.scalar_one_or_none()
 
-                    if row["is_valid"]:
-                        if existing:
-                            # 更新 last_valid_date
-                            existing.last_valid_date = row["last_valid_date"]
-                            existing.updated_at = datetime.now()
-                            updated_count += 1
+                        if row["is_valid"]:
+                            if existing:
+                                # 更新 last_valid_date
+                                existing.last_valid_date = row["last_valid_date"]
+                                existing.updated_at = datetime.now()
+                                updated_count += 1
+                            else:
+                                # 新狀態訊號
+                                signal = StockSignalHistory(
+                                    stock_id=row["stock_id"],
+                                    signal_name=row["signal_name"],
+                                    signal_type=row["signal_type"],
+                                    trigger_date=row["trigger_date"],
+                                    last_valid_date=row["last_valid_date"],
+                                    score=row["score"],
+                                )
+                                session.add(signal)
+                                inserted_count += 1
                         else:
-                            # 新狀態訊號
-                            signal = StockSignalHistory(
-                                stock_id=row["stock_id"],
-                                signal_name=row["signal_name"],
-                                signal_type=row["signal_type"],
-                                trigger_date=row["trigger_date"],
-                                last_valid_date=row["last_valid_date"],
-                                score=row["score"],
-                            )
-                            session.add(signal)
-                            inserted_count += 1
-                    else:
-                        # 標記失效（設定 last_valid_date = NULL）
-                        if existing:
-                            existing.last_valid_date = None
-                            existing.updated_at = datetime.now()
-                            updated_count += 1
+                            # 標記失效（設定 last_valid_date = NULL）
+                            if existing:
+                                existing.last_valid_date = None
+                                existing.updated_at = datetime.now()
+                                updated_count += 1
 
-                print(
-                    f"狀態訊號：新增 {inserted_count} 個，更新 {updated_count} 個"
-                )
+                    print(
+                        f"狀態訊號：新增 {inserted_count} 個，更新 {updated_count} 個"
+                    )
 
             await session.commit()
 
@@ -564,7 +593,7 @@ class SignalUpdater:
                 signals_detail = []
                 for s in valid_signals:
                     # 處理 trigger_date 可能是 datetime 或 date
-                    trigger_date = s.trigger_date if isinstance(s.trigger_date, date) else s.trigger_date.date()
+                    trigger_date = s.trigger_date.date() if isinstance(s.trigger_date, datetime) else s.trigger_date
                     days_since = (today - trigger_date).days
                     signals_detail.append(
                         {

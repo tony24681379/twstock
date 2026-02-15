@@ -108,9 +108,14 @@ class VectorizedIndicatorEngine:
                 group['close'].values,
                 timeperiod=14
             )
-            return pd.Series(adx, index=group.index)
+            return pd.Series(adx, index=group.index, name='adx')
 
-        df['adx'] = df.groupby('stock_id', group_keys=False).apply(calc_adx)
+        adx_series = df.groupby('stock_id', group_keys=False).apply(calc_adx, include_groups=False)
+        if isinstance(adx_series, pd.DataFrame):
+            # 如果返回 DataFrame，提取第一列
+            df['adx'] = adx_series.iloc[:, 0]
+        else:
+            df['adx'] = adx_series
 
         # ✅ 批次計算布林通道（Bollinger Bands）
         def calc_bollinger(group):

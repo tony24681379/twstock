@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.config import ALLOWED_ORIGINS, API_DESCRIPTION, API_TITLE, API_VERSION
 from api.routers import cache, stocks
 from twstock.database import DatabaseManager
+from api.cache import RedisClient
 
 # 設定日誌
 logging.basicConfig(
@@ -39,12 +40,24 @@ async def lifespan(app: FastAPI):
     await db_manager.init_database()
     print("✅ 資料庫連線成功")
 
+    # Startup: 初始化 Redis 快取
+    print("🚀 初始化 Redis 快取...")
+    await RedisClient.connect()
+    redis_status = "成功" if await RedisClient.health_check() else "停用（REDIS_URL 未設定）"
+    print(f"✅ Redis 快取: {redis_status}")
+
     yield
 
     # Shutdown: 清理資源
     print("🔌 關閉資料庫連線...")
     if db_manager:
         await db_manager.close()
+    print("✅ 資料庫連線已關閉")
+
+    print("🔌 關閉 Redis 連線...")
+    await RedisClient.disconnect()
+    print("✅ Redis 連線已關閉")
+
     print("✅ 資源清理完成")
 
 
@@ -117,6 +130,7 @@ async def health_check():
                 content={
                     "status": "unhealthy",
                     "database": "not initialized",
+                    "redis": "unknown",
                     "version": API_VERSION,
                 },
             )
@@ -128,7 +142,16 @@ async def health_check():
             result = await session.execute(text("SELECT 1"))
             result.scalar()
 
-        return {"status": "healthy", "database": "connected", "version": API_VERSION}
+        # 檢查 Redis 連線
+        redis_healthy = await RedisClient.health_check()
+        redis_status = "connected" if redis_healthy else "disconnected"
+
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "redis": redis_status,
+            "version": API_VERSION,
+        }
 
     except Exception as e:
         logger.error(f"健康檢查失敗: {str(e)}")
@@ -137,6 +160,7 @@ async def health_check():
             content={
                 "status": "unhealthy",
                 "database": "error",
+                "redis": "unknown",
                 "error": str(e),
                 "version": API_VERSION,
             },

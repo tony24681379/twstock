@@ -30,6 +30,7 @@ from api.models.stock import (
     StockHistory,
     StockListItem,
 )
+from api.cache import cache_query_result
 from api.services.fundamental_signal_service import FundamentalSignalService
 from api.services.indicator_service import IndicatorService
 from api.services.signal_service import SignalService
@@ -384,6 +385,11 @@ class StockService:
         print(f"✅ 完成（{len(stock_ids)} 支股票）", file=sys.stderr, flush=True)
         print(f"⏱️  總耗時: {time.time() - start_time:.2f}s", file=sys.stderr, flush=True)
 
+        # 🆕 批次載入警示狀態（避免 N+1 查詢）
+        t_alert = time.time()
+        alert_status_dict = await api_db_manager.bulk_load_alert_status(stock_ids)
+        print(f"⏱️  bulk_load_alert_status: {time.time() - t_alert:.2f}s", file=sys.stderr, flush=True)
+
         # 組裝回應資料（整合籌碼 + 技術 + 基本面）
         items = []
         for stock_list, stock_info, close_price, last_date in rows:
@@ -523,11 +529,20 @@ class StockService:
             all_signals = chip_signals + tech_signals + fund_signals
             major_signals = [s.name for s in all_signals[:3]]
 
+            # 🆕 警示狀態
+            alert_status = None
+            if stock_id in alert_status_dict:
+                from api.models.stock import AlertStatus
+                alert_data = alert_status_dict[stock_id]
+                alert_status = AlertStatus(**alert_data)
+
             items.append(
                 StockListItem(
                     stock_id=stock_id,
                     name=stock_list.name or stock_id,
                     close_price=close_price if close_price else 0.0,
+                    # 警示狀態（新增）
+                    alert_status=alert_status,
                     # 三種強度（籌碼 + 技術 + 基本面）
                     chip_strength=chip_strength,
                     technical_strength=tech_strength,
@@ -594,6 +609,7 @@ class StockService:
         return items, pagination
 
     @staticmethod
+    @cache_query_result(prefix="stock", ttl=3600, key_params=["stock_id"])
     async def get_stock_detail(
         session: AsyncSession, stock_id: str
     ) -> Optional[StockDetail]:
@@ -731,9 +747,20 @@ class StockService:
             except (json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.warning(f"解析 {stock_id} 詳情頁 signals_detail 失敗: {e}")
 
+        # 🆕 載入警示狀態
+        from api.main import db_manager as api_db_manager
+        alert_status = None
+        if api_db_manager:
+            alert_status_dict = await api_db_manager.bulk_load_alert_status([stock_id])
+            if stock_id in alert_status_dict:
+                from api.models.stock import AlertStatus
+                alert_data = alert_status_dict[stock_id]
+                alert_status = AlertStatus(**alert_data)
+
         return StockDetail(
             basic_info=basic_info,
             price_info=price_info,
+            alert_status=alert_status,  # 🆕 警示狀態
             chip_signals=chip_signals,
             technical_signals=tech_signals,  # ✅ 返回過濾後的技術訊號
             expected_return=expected_return,
@@ -745,6 +772,7 @@ class StockService:
         )
 
     @staticmethod
+    @cache_query_result(prefix="history", ttl=3600, key_params=["stock_id", "weeks"])
     async def get_stock_history(
         session: AsyncSession, stock_id: str, weeks: int = 12
     ) -> Optional[StockHistory]:
@@ -821,6 +849,7 @@ class StockService:
         return StockHistory(stock_id=stock_id, data=list(reversed(data_points)))
 
     @staticmethod
+    @cache_query_result(prefix="chart", ttl=7200, key_params=["stock_id", "period", "indicators"])
     async def get_chart_data(
         session: AsyncSession, stock_id: str, period: str = "3M", indicators: str = "MA"
     ) -> Optional[ChartDataResponse]:
@@ -905,6 +934,7 @@ class StockService:
         )
 
     @staticmethod
+    @cache_query_result(prefix="chips", ttl=3600, key_params=["stock_id", "days"])
     async def get_chips_data(
         session: AsyncSession, stock_id: str, days: int = 30
     ) -> Optional[ChipsData]:
@@ -1074,6 +1104,7 @@ class StockService:
         )
 
     @staticmethod
+    @cache_query_result(prefix="fundamental", ttl=21600, key_params=["stock_id"])
     async def get_fundamental_info(
         session: AsyncSession, stock_id: str
     ) -> Optional[FundamentalInfo]:

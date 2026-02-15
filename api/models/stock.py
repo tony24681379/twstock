@@ -15,6 +15,32 @@ class ChipSignal(BaseModel):
     description: Optional[str] = None
 
 
+class AlertStatus(BaseModel):
+    """警示狀態"""
+
+    is_attention_stock: bool = Field(default=False, description="是否為注意股")
+    is_disposal_stock: bool = Field(default=False, description="是否為處置股")
+
+    # 注意股詳情
+    attention_count: Optional[int] = Field(None, description="累計注意次數")
+    attention_reason: Optional[str] = Field(None, description="注意交易資訊")
+    attention_date: Optional[str] = Field(None, description="最近注意日期")
+
+    # 處置股詳情
+    disposal_type: Optional[str] = Field(None, description="處置類型（第一次處置/第二次處置）")
+    disposal_announced_date: Optional[str] = Field(None, description="處置公布日期")
+    disposal_start_date: Optional[str] = Field(None, description="處置起始日期")
+    disposal_end_date: Optional[str] = Field(None, description="處置迄日")
+    disposal_condition: Optional[str] = Field(None, description="處置條件")
+    disposal_measure: Optional[str] = Field(None, description="處置措施")
+    disposal_content: Optional[str] = Field(None, description="處置內容")
+
+    # 系統預警
+    system_warning: bool = Field(default=False, description="系統預警標記")
+    warning_score: int = Field(default=0, description="風險分數 0-100")
+    warning_reasons: List[str] = Field(default_factory=list, description="預警原因列表")
+
+
 class StockListItem(BaseModel):
     """股票列表項目"""
 
@@ -22,9 +48,12 @@ class StockListItem(BaseModel):
     name: str = Field(..., description="股票名稱")
     close_price: float = Field(..., description="收盤價")
 
+    # 警示狀態（新增）
+    alert_status: Optional[AlertStatus] = Field(None, description="警示狀態")
+
     # 三種強度（籌碼 + 技術 + 基本面）
     chip_strength: int = Field(..., ge=-25, le=89, description="籌碼強度（原始分數）")
-    technical_strength: int = Field(..., ge=-120, le=164, description="技術強度（原始分數）")
+    technical_strength: int = Field(..., ge=-170, le=194, description="技術強度（原始分數）")
     fundamental_strength: int = Field(..., ge=-73, le=93, description="基本面強度（原始分數）")
     overall_strength: int = Field(..., ge=0, le=100, description="綜合強度 (0-100)")
 
@@ -256,6 +285,9 @@ class StockDetail(BaseModel):
 
     basic_info: BasicInfo
     price_info: PriceInfo
+
+    # 警示狀態（新增）
+    alert_status: Optional[AlertStatus] = Field(None, description="警示狀態")
 
     # 訊號列表（更新：新增基本面資訊）
     chip_signals: List[ChipSignal] = Field(default_factory=list, description="籌碼訊號")
