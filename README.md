@@ -206,6 +206,42 @@ twstock.realtime.get(['2330', '2337', '2409'])  # 擷取當前三檔資訊
 
 * [tw-stocker](https://github.com/mlouielu/stocker)
 
+## 資料維護
+
+### 線上版資料保留策略
+
+線上版使用 Neon Free Tier（3GB 儲存），只保留最近 250 個交易日的資料。
+
+**查看資料統計：**
+```bash
+curl http://your-api.com/api/maintenance/stats
+```
+
+**模擬清理（不實際刪除）：**
+```bash
+curl -X POST http://your-api.com/api/maintenance/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": true}'
+```
+
+**執行清理：**
+```bash
+curl -X POST http://your-api.com/api/maintenance/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{"vacuum": true}'
+```
+
+**環境變數：**
+- `ENVIRONMENT=production` - 生產環境
+- `DATA_RETENTION_DAYS=250` - 保留 250 個交易日
+- `CLEANUP_VACUUM=true` - 清理後執行 VACUUM
+
+### 本地版資料保留
+
+本地版永久保留所有歷史資料（`DATA_RETENTION_DAYS=0`），無需清理。
+
+詳細說明請參考 [docs/DATA_RETENTION.md](docs/DATA_RETENTION.md)
+
 ## Contributing
 
 twstock was created by Louie Lu `<git@louie.lu>`.

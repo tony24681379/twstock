@@ -103,3 +103,32 @@ ENV/
 /daily
 /info
 *.xlsx
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+terraform.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Process ID files
+*.pid
+.*.pid
+
+# SQLite temporary files
+*.db-shm
+*.db-wal
+
+# Jupyter notebooks (development only)
+*.ipynb
+.ipynb_checkpoints/
+
+# Production environment secrets
+.env.production

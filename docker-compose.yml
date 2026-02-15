@@ -43,6 +43,23 @@ services:
       -c log_timezone='Asia/Taipei'
       -c timezone='Asia/Taipei'
 
+  redis:
+    image: redis:7-alpine
+    container_name: twstock-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - twstock-network
+
   api:
     build:
       context: .
@@ -60,10 +77,17 @@ services:
       REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      REDIS_URL: redis://redis:6379
+      # 資料保留策略（本地版永久保留）
+      ENVIRONMENT: development
+      DATA_RETENTION_DAYS: 0
+      CLEANUP_VACUUM: false
     ports:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -117,6 +141,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
   pgadmin_data:
     driver: local
