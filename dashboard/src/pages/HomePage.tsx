@@ -5,6 +5,7 @@ import { fetchStocks } from '../lib/api'
 import { getSignalStrengthBadgeClass, getRawScoreBadgeClass } from '../lib/colorUtils'
 import { WeightController } from '../components/WeightController'
 import SignalTooltip from '../components/SignalTooltip'
+import { AlertIcon } from '../components/AlertIcon'
 import type { StockListItem } from '../types/stock'
 
 export default function HomePage() {
@@ -185,9 +186,10 @@ export default function HomePage() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <Link
                       to={`/stocks/${stock.stock_id}`}
-                      className="text-sm font-medium text-primary hover:underline"
+                      className="text-sm font-medium text-primary hover:underline inline-flex items-center"
                     >
                       {stock.stock_id}
+                      <AlertIcon alertStatus={stock.alert_status} />
                     </Link>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">

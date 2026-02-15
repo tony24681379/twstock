@@ -4,7 +4,6 @@
  * 顯示 Google 登入按鈕或使用者資訊
  */
 
-import React from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
 import { useAuth } from '../contexts/AuthContext'
 

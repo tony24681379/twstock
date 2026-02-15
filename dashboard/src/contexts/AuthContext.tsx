@@ -5,7 +5,7 @@
  * 支援環境變數開關驗證功能
  */
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
 interface AuthUser {
   email: string
@@ -70,14 +70,52 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = async (credential: string) => {
     try {
+      // 驗證 credential 格式
+      if (!credential || typeof credential !== 'string') {
+        throw new Error('Invalid credential format')
+      }
+
       // 解碼 JWT token 取得使用者資訊
-      const payload = JSON.parse(atob(credential.split('.')[1]))
+      const parts = credential.split('.')
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT token format')
+      }
+
+      // URL-safe base64 解碼函數
+      const base64UrlDecode = (str: string): string => {
+        try {
+          // 將 URL-safe base64 轉換為標準 base64
+          // 替換 - 為 +，_ 為 /
+          let base64 = str.replace(/-/g, '+').replace(/_/g, '/')
+
+          // 補齊 padding（=）
+          const padding = base64.length % 4
+          if (padding > 0) {
+            base64 += '='.repeat(4 - padding)
+          }
+
+          return atob(base64)
+        } catch (e) {
+          console.error('Base64 decode error:', e)
+          throw new Error('無法解碼 token，請稍後再試')
+        }
+      }
+
+      const payloadJson = base64UrlDecode(parts[1])
+      const payload = JSON.parse(payloadJson)
+
+      // 驗證必要欄位
+      if (!payload.email) {
+        throw new Error('Token 中缺少 email 資訊')
+      }
 
       const authUser: AuthUser = {
         email: payload.email,
         name: payload.name,
         picture: payload.picture,
       }
+
+      console.log('Login successful for:', authUser.email)
 
       // 儲存到 state 和 localStorage
       setToken(credential)
@@ -86,7 +124,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       localStorage.setItem('auth_user', JSON.stringify(authUser))
     } catch (error) {
       console.error('Login failed:', error)
-      throw new Error('Failed to process authentication')
+      // 提供更詳細的錯誤訊息
+      if (error instanceof Error) {
+        throw new Error(`認證失敗: ${error.message}`)
+      }
+      throw new Error('認證處理失敗，請稍後再試')
     }
   }
 
