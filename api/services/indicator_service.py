@@ -25,6 +25,8 @@ class IndicatorService:
         """
         result = {}
         for period in periods:
+            if len(close_prices) < period + 5:
+                continue
             ma = talib.SMA(close_prices, timeperiod=period)
             result[f"MA{period}"] = ma.tolist()
         return result
@@ -156,5 +158,4 @@ class IndicatorService:
             elif indicator == "BB" or indicator == "BBANDS":
                 result["BB"] = IndicatorService.calculate_bollinger_bands(close_np)
 
-        return result
         return result

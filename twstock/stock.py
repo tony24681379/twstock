@@ -276,7 +276,13 @@ class Stock(analytics.Analytics):
     def calc_change(self, after, before):
         return round((after - before) / before * 100, 2)
 
-    def calc_base(self):
+    def calc_base(self, mode='full'):
+        """計算技術指標
+
+        Args:
+            mode: 'full' = 所有指標（含 MA60、四線乖離）
+                  'short' = 僅短線指標（跳過 MA60，加速計算）
+        """
         if self.info_data is None or len(self.close) == 0:
             return
 
@@ -303,7 +309,11 @@ class Stock(analytics.Analytics):
         self.daily_data["ma5"] = talib.MA(self.close, timeperiod=5)
         self.daily_data["ma10"] = talib.MA(self.close, timeperiod=10)
         self.daily_data["ma20"] = talib.MA(self.close, timeperiod=20)
-        self.daily_data["ma60"] = talib.MA(self.close, timeperiod=60)
+        import numpy as np
+        if mode == 'full':
+            self.daily_data["ma60"] = talib.MA(self.close, timeperiod=60)
+        else:
+            self.daily_data["ma60"] = np.nan
         self.daily_data["k9"] = k9
         self.daily_data["d9"] = d9
         self.daily_data["macd"] = macd
@@ -322,22 +332,24 @@ class Stock(analytics.Analytics):
             self.high, self.low, self.close, timeperiod=14
         )
 
-        self.calc_line_diff()
+        self.calc_line_diff(mode=mode)
         self.calc_trend()
         self.season_upper_and_lower()
-        self.daily_data = self.daily_data.dropna(how="any")
 
-    def calc_line_diff(self):
+        # 只依據核心短線指標 dropna，避免 MA60/ADX/ADXR 的 NaN 拖累行數
+        essential_cols = ['ma5', 'ma10', 'ma20', 'k9', 'd9', 'macd', 'macdsignal',
+                          'macdhist', 'bollinger_upper', 'bollinger_lower']
+        self.daily_data = self.daily_data.dropna(subset=essential_cols, how="any")
+
+    def calc_line_diff(self, mode='full'):
         """
         計算三線乖離和四線乖離（向量化版本）
 
         三線乖離 = (max(ma5, ma10, ma20) - min(ma5, ma10, ma20)) / mean(ma5, ma10, ma20)
         四線乖離 = (max(ma5, ma10, ma20, ma60) - min(ma5, ma10, ma20, ma60)) / mean(ma5, ma10, ma20, ma60)
 
-        使用 numpy 向量化操作，相比原版 Python 迴圈提升 10-15x 性能
-
-        注意：當 MA 欄位包含 NaN 時（如數據不足），計算結果也會是 NaN，
-        這些行會在後續的 dropna() 中被過濾掉
+        Args:
+            mode: 'full' = 三線+四線乖離, 'short' = 僅三線乖離
         """
         import numpy as np
 
@@ -346,45 +358,41 @@ class Stock(analytics.Analytics):
             "ma5" not in self.daily_data.columns
             or "ma10" not in self.daily_data.columns
             or "ma20" not in self.daily_data.columns
-            or "ma60" not in self.daily_data.columns
         ):
-            # MA 欄位未計算，可能數據不足，返回空值
             self.daily_data["three_line_diff"] = np.nan
             self.daily_data["four_line_diff"] = np.nan
             return
 
         # ✅ 向量化三線計算
-        # 從 DataFrame 取得 numpy 陣列（Shape: (n_days, 3)）
-        # 注意：如果 MA 值是 NaN，計算結果也會是 NaN
         mas_3 = self.daily_data[["ma5", "ma10", "ma20"]].values
-        three_max = np.max(mas_3, axis=1)  # 單次操作處理所有行
+        three_max = np.max(mas_3, axis=1)
         three_min = np.min(mas_3, axis=1)
         three_avg = np.mean(mas_3, axis=1)
 
-        # 處理除零情況：避免 division by zero 警告，並將結果設為 NaN
         with np.errstate(divide="ignore", invalid="ignore"):
             three_line_diff = (three_max - three_min) / three_avg
-            # 將零平均值和無效值都設為 NaN
             three_line_diff = np.where(
                 (three_avg == 0) | np.isnan(three_avg), np.nan, three_line_diff
             )
 
-        # ✅ 向量化四線計算
-        mas_4 = self.daily_data[["ma5", "ma10", "ma20", "ma60"]].values
-        four_max = np.max(mas_4, axis=1)
-        four_min = np.min(mas_4, axis=1)
-        four_avg = np.mean(mas_4, axis=1)
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            four_line_diff = (four_max - four_min) / four_avg
-            # 將零平均值和無效值都設為 NaN
-            four_line_diff = np.where(
-                (four_avg == 0) | np.isnan(four_avg), np.nan, four_line_diff
-            )
-
-        # 將結果寫回 DataFrame
         self.daily_data["three_line_diff"] = three_line_diff
-        self.daily_data["four_line_diff"] = four_line_diff
+
+        # ✅ 四線乖離：只在 full mode 且有 ma60 欄位時計算
+        if mode == 'full' and "ma60" in self.daily_data.columns:
+            mas_4 = self.daily_data[["ma5", "ma10", "ma20", "ma60"]].values
+            four_max = np.max(mas_4, axis=1)
+            four_min = np.min(mas_4, axis=1)
+            four_avg = np.mean(mas_4, axis=1)
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                four_line_diff = (four_max - four_min) / four_avg
+                four_line_diff = np.where(
+                    (four_avg == 0) | np.isnan(four_avg), np.nan, four_line_diff
+                )
+
+            self.daily_data["four_line_diff"] = four_line_diff
+        else:
+            self.daily_data["four_line_diff"] = np.nan
 
     def calc_trend(self):
         high = -sys.maxsize - 1
@@ -477,7 +485,8 @@ class Stock(analytics.Analytics):
         self.daily_data["trend"] = trend
 
     def season_upper_and_lower(self):
-        self.season = self.daily_data[-60:].sort_values(by="close")
+        n = min(60, len(self.daily_data))
+        self.season = self.daily_data[-n:].sort_values(by="close")
 
     @property
     def info(self):

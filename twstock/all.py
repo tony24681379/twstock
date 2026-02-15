@@ -162,9 +162,13 @@ class All:
         except asyncio.CancelledError:
             pass
 
-    async def get_all_stock_parallel(self):
+    async def get_all_stock_parallel(self, fast_mode=False):
         """
         批次處理所有股票的主流程
+
+        Args:
+            fast_mode: True = 短線模式（少載入資料、跳過 MA60）
+                       False = 完整模式（所有指標）
 
         流程:
         1. 從 API 取得所有股票清單（在 get_all_stock_list 已完成）
@@ -358,8 +362,9 @@ class All:
         if hasattr(self.fetcher, "db_manager"):
             print(f"   載入 {len(all_stock_ids)} 支股票的資料...")
             # 使用批次 SQL 查詢（只查詢一次！）
+            load_days = 100 if fast_mode else 150
             bulk_daily_data = await self.fetcher.db_manager.bulk_load_daily_data(
-                all_stock_ids, days=200  # 200 日曆日 ≈ 137 交易日，dropna 後 78 行，緩衝 18 行
+                all_stock_ids, days=load_days
             )
             bulk_info_data = await self.fetcher.db_manager.bulk_load_stock_info(
                 all_stock_ids
@@ -509,12 +514,16 @@ class All:
         MAX_WORKERS = int(os.getenv("MAX_WORKERS", "20"))
         semaphore = asyncio.Semaphore(MAX_WORKERS)
 
+        calc_mode = 'short' if fast_mode else 'full'
+        min_data_len = 30 if fast_mode else 60
+
         async def process_with_semaphore(sid):
             async with semaphore:
                 # 使用批次載入的資料
                 if sid in bulk_daily_data and sid in bulk_info_data:
                     return await self.get_stock_from_bulk_data(
-                        sid, bulk_info_data[sid], bulk_daily_data[sid]
+                        sid, bulk_info_data[sid], bulk_daily_data[sid],
+                        mode=calc_mode, min_data_len=min_data_len,
                     )
                 else:
                     # 如果批次載入失敗，返回空結果
@@ -1280,9 +1289,15 @@ class All:
         return result if result != 0 else None
 
     async def get_stock_from_bulk_data(
-        self, sid: str, info_data: pd.Series, daily_data: pd.DataFrame
+        self, sid: str, info_data: pd.Series, daily_data: pd.DataFrame,
+        mode: str = 'full', min_data_len: int = 60,
     ):
-        """使用批次載入的資料處理股票（不查詢資料庫）"""
+        """使用批次載入的資料處理股票（不查詢資料庫）
+
+        Args:
+            mode: 'full' 或 'short'（傳給 calc_base）
+            min_data_len: 最低資料筆數門檻
+        """
         stock = Stock(sid, fetcher=self.fetcher)
 
         # 直接設置資料，不從資料庫載入
@@ -1292,10 +1307,10 @@ class All:
         # 處理資料
         if stock.daily_data is not None and len(stock.daily_data) > 0:
             stock.daily_data = stock.daily_data[::-1].copy()  # 反轉順序
-            stock.calc_base()
+            stock.calc_base(mode=mode)
 
         # 檢查是否有足夠的資料進行分析
-        if not hasattr(stock, "close") or len(stock.close) < 60:
+        if not hasattr(stock, "close") or len(stock.close) < min_data_len:
             return (
                 stock.sid,
                 pd.Series(index=INDEX + SKILL_INDEX),

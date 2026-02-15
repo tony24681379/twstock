@@ -196,41 +196,43 @@ class VectorizedSignalDetector:
             )
         )
 
-        # 3. 四線合一向上（MA5/10/20/60 全部向上）
-        four_line_up = (
-            (latest["ma5"] > prev["ma5"])
-            & (latest["ma10"] > prev["ma10"])
-            & (latest["ma20"] > prev["ma20"])
-            & (latest["ma60"] > prev["ma60"])
-            & (latest["ma5"] > latest["ma10"])
-            & (latest["ma10"] > latest["ma20"])
-            & (latest["ma20"] > latest["ma60"])
-        )
-        signal_results.append(
-            latest[four_line_up][["stock_id", "date"]].assign(
-                signal_name="四線合一向上",
-                triggered=True,
-                score=SignalScore.FOUR_LINE_UP,
+        # 3. 四線合一向上（MA5/10/20/60 全部向上）— 需要 ma60
+        has_ma60 = "ma60" in latest.columns and latest["ma60"].notna().any()
+        if has_ma60:
+            four_line_up = (
+                (latest["ma5"] > prev["ma5"])
+                & (latest["ma10"] > prev["ma10"])
+                & (latest["ma20"] > prev["ma20"])
+                & (latest["ma60"] > prev["ma60"])
+                & (latest["ma5"] > latest["ma10"])
+                & (latest["ma10"] > latest["ma20"])
+                & (latest["ma20"] > latest["ma60"])
             )
-        )
+            signal_results.append(
+                latest[four_line_up][["stock_id", "date"]].assign(
+                    signal_name="四線合一向上",
+                    triggered=True,
+                    score=SignalScore.FOUR_LINE_UP,
+                )
+            )
 
-        # 4. 四線合一向下
-        four_line_down = (
-            (latest["ma5"] < prev["ma5"])
-            & (latest["ma10"] < prev["ma10"])
-            & (latest["ma20"] < prev["ma20"])
-            & (latest["ma60"] < prev["ma60"])
-            & (latest["ma5"] < latest["ma10"])
-            & (latest["ma10"] < latest["ma20"])
-            & (latest["ma20"] < latest["ma60"])
-        )
-        signal_results.append(
-            latest[four_line_down][["stock_id", "date"]].assign(
-                signal_name="四線合一向下",
-                triggered=True,
-                score=SignalScore.FOUR_LINE_DOWN,
+            # 4. 四線合一向下
+            four_line_down = (
+                (latest["ma5"] < prev["ma5"])
+                & (latest["ma10"] < prev["ma10"])
+                & (latest["ma20"] < prev["ma20"])
+                & (latest["ma60"] < prev["ma60"])
+                & (latest["ma5"] < latest["ma10"])
+                & (latest["ma10"] < latest["ma20"])
+                & (latest["ma20"] < latest["ma60"])
             )
-        )
+            signal_results.append(
+                latest[four_line_down][["stock_id", "date"]].assign(
+                    signal_name="四線合一向下",
+                    triggered=True,
+                    score=SignalScore.FOUR_LINE_DOWN,
+                )
+            )
 
         # 5. 黃金交叉（MA5 向上穿越 MA20）
         golden_cross = (latest["ma5"] > latest["ma20"]) & (prev["ma5"] <= prev["ma20"])
@@ -248,27 +250,28 @@ class VectorizedSignalDetector:
             )
         )
 
-        # ========== 季線訊號 (2 個) ==========
+        # ========== 季線訊號 (2 個) — 需要 ma60 ==========
 
-        # 7. 站上季線
-        above_ma60 = (latest["close"] > latest["ma60"]) & (
-            prev["close"] <= prev["ma60"]
-        )
-        signal_results.append(
-            latest[above_ma60][["stock_id", "date"]].assign(
-                signal_name="站上季線", triggered=True, score=SignalScore.ABOVE_MA60
+        if has_ma60:
+            # 7. 站上季線
+            above_ma60 = (latest["close"] > latest["ma60"]) & (
+                prev["close"] <= prev["ma60"]
             )
-        )
+            signal_results.append(
+                latest[above_ma60][["stock_id", "date"]].assign(
+                    signal_name="站上季線", triggered=True, score=SignalScore.ABOVE_MA60
+                )
+            )
 
-        # 8. 跌破季線
-        below_ma60 = (latest["close"] < latest["ma60"]) & (
-            prev["close"] >= prev["ma60"]
-        )
-        signal_results.append(
-            latest[below_ma60][["stock_id", "date"]].assign(
-                signal_name="跌破季線", triggered=True, score=SignalScore.BELOW_MA60
+            # 8. 跌破季線
+            below_ma60 = (latest["close"] < latest["ma60"]) & (
+                prev["close"] >= prev["ma60"]
             )
-        )
+            signal_results.append(
+                latest[below_ma60][["stock_id", "date"]].assign(
+                    signal_name="跌破季線", triggered=True, score=SignalScore.BELOW_MA60
+                )
+            )
 
         # ========== 動量訊號 (4 個) ==========
 
@@ -788,33 +791,35 @@ class VectorizedSignalDetector:
                 )
             )
 
-        # 3. 站上季線（收盤價向上穿越 MA60）
-        above_ma60 = (latest["close"] > latest["ma60"]) & (
-            prev["close"] <= prev["ma60"]
-        )
-        if above_ma60.any():
-            new_signals.append(
-                latest[above_ma60][["stock_id", "date"]].assign(
-                    signal_name="站上季線",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.ABOVE_MA60,
-                    trigger_date=latest[above_ma60]["date"],
-                )
+        # 3. 站上季線（收盤價向上穿越 MA60）— 需要 ma60
+        has_ma60 = "ma60" in latest.columns and latest["ma60"].notna().any()
+        if has_ma60:
+            above_ma60 = (latest["close"] > latest["ma60"]) & (
+                prev["close"] <= prev["ma60"]
             )
+            if above_ma60.any():
+                new_signals.append(
+                    latest[above_ma60][["stock_id", "date"]].assign(
+                        signal_name="站上季線",
+                        signal_type=SIGNAL_TYPE_CROSSOVER,
+                        score=SignalScore.ABOVE_MA60,
+                        trigger_date=latest[above_ma60]["date"],
+                    )
+                )
 
-        # 4. 跌破季線（收盤價向下跌破 MA60）
-        below_ma60 = (latest["close"] < latest["ma60"]) & (
-            prev["close"] >= prev["ma60"]
-        )
-        if below_ma60.any():
-            new_signals.append(
-                latest[below_ma60][["stock_id", "date"]].assign(
-                    signal_name="跌破季線",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.BELOW_MA60,
-                    trigger_date=latest[below_ma60]["date"],
-                )
+            # 4. 跌破季線（收盤價向下跌破 MA60）
+            below_ma60 = (latest["close"] < latest["ma60"]) & (
+                prev["close"] >= prev["ma60"]
             )
+            if below_ma60.any():
+                new_signals.append(
+                    latest[below_ma60][["stock_id", "date"]].assign(
+                        signal_name="跌破季線",
+                        signal_type=SIGNAL_TYPE_CROSSOVER,
+                        score=SignalScore.BELOW_MA60,
+                        trigger_date=latest[below_ma60]["date"],
+                    )
+                )
 
         # 5. KD向上（K<20, D<20, K穿越D向上）
         kd_up = (
@@ -1340,111 +1345,114 @@ class VectorizedSignalDetector:
                     }
                 )
 
-        # 5. 四線合一向上（MA5/10/20/60 全部向上）
-        signal_name = "四線合一向上"
-        four_line_up = (
-            (latest["ma5"] > prev["ma5"])
-            & (latest["ma10"] > prev["ma10"])
-            & (latest["ma20"] > prev["ma20"])
-            & (latest["ma60"] > prev["ma60"])
-            & (latest["ma5"] > latest["ma10"])
-            & (latest["ma10"] > latest["ma20"])
-            & (latest["ma20"] > latest["ma60"])
-        )
+        # 5-6. 四線合一向上/向下（MA5/10/20/60）— 需要 ma60
+        has_ma60 = "ma60" in latest.columns and latest["ma60"].notna().any()
+        if has_ma60:
+            # 5. 四線合一向上
+            signal_name = "四線合一向上"
+            four_line_up = (
+                (latest["ma5"] > prev["ma5"])
+                & (latest["ma10"] > prev["ma10"])
+                & (latest["ma20"] > prev["ma20"])
+                & (latest["ma60"] > prev["ma60"])
+                & (latest["ma5"] > latest["ma10"])
+                & (latest["ma10"] > latest["ma20"])
+                & (latest["ma20"] > latest["ma60"])
+            )
 
-        for stock_id in all_stock_ids:
-            stock_latest = latest[latest["stock_id"] == stock_id].iloc[0]
-            is_valid = four_line_up[latest["stock_id"] == stock_id].iloc[0]
+            for stock_id in all_stock_ids:
+                stock_latest = latest[latest["stock_id"] == stock_id].iloc[0]
+                is_valid = four_line_up[latest["stock_id"] == stock_id].iloc[0]
 
-            existing = None
-            if history_df is not None and not history_df.empty:
-                existing_records = history_df[
-                    (history_df["stock_id"] == stock_id)
-                    & (history_df["signal_name"] == signal_name)
-                ]
-                if not existing_records.empty:
-                    existing = existing_records.iloc[-1]
+                existing = None
+                if history_df is not None and not history_df.empty:
+                    existing_records = history_df[
+                        (history_df["stock_id"] == stock_id)
+                        & (history_df["signal_name"] == signal_name)
+                    ]
+                    if not existing_records.empty:
+                        existing = existing_records.iloc[-1]
 
-            if is_valid:
-                trigger_date = (
-                    existing["trigger_date"] if existing is not None else stock_latest["date"]
-                )
-                validated_signals.append(
-                    {
-                        "stock_id": stock_id,
-                        "signal_name": signal_name,
-                        "signal_type": SIGNAL_TYPE_STATE,
-                        "score": SignalScore.FOUR_LINE_UP,
-                        "trigger_date": trigger_date,
-                        "last_valid_date": stock_latest["date"],
-                        "is_valid": True,
-                    }
-                )
-            elif existing is not None:
-                validated_signals.append(
-                    {
-                        "stock_id": stock_id,
-                        "signal_name": signal_name,
-                        "signal_type": SIGNAL_TYPE_STATE,
-                        "score": SignalScore.FOUR_LINE_UP,
-                        "trigger_date": existing["trigger_date"],
-                        "last_valid_date": existing.get("last_valid_date"),
-                        "is_valid": False,
-                    }
-                )
+                if is_valid:
+                    trigger_date = (
+                        existing["trigger_date"] if existing is not None else stock_latest["date"]
+                    )
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.FOUR_LINE_UP,
+                            "trigger_date": trigger_date,
+                            "last_valid_date": stock_latest["date"],
+                            "is_valid": True,
+                        }
+                    )
+                elif existing is not None:
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.FOUR_LINE_UP,
+                            "trigger_date": existing["trigger_date"],
+                            "last_valid_date": existing.get("last_valid_date"),
+                            "is_valid": False,
+                        }
+                    )
 
-        # 6. 四線合一向下
-        signal_name = "四線合一向下"
-        four_line_down = (
-            (latest["ma5"] < prev["ma5"])
-            & (latest["ma10"] < prev["ma10"])
-            & (latest["ma20"] < prev["ma20"])
-            & (latest["ma60"] < prev["ma60"])
-            & (latest["ma5"] < latest["ma10"])
-            & (latest["ma10"] < latest["ma20"])
-            & (latest["ma20"] < latest["ma60"])
-        )
+            # 6. 四線合一向下
+            signal_name = "四線合一向下"
+            four_line_down = (
+                (latest["ma5"] < prev["ma5"])
+                & (latest["ma10"] < prev["ma10"])
+                & (latest["ma20"] < prev["ma20"])
+                & (latest["ma60"] < prev["ma60"])
+                & (latest["ma5"] < latest["ma10"])
+                & (latest["ma10"] < latest["ma20"])
+                & (latest["ma20"] < latest["ma60"])
+            )
 
-        for stock_id in all_stock_ids:
-            stock_latest = latest[latest["stock_id"] == stock_id].iloc[0]
-            is_valid = four_line_down[latest["stock_id"] == stock_id].iloc[0]
+            for stock_id in all_stock_ids:
+                stock_latest = latest[latest["stock_id"] == stock_id].iloc[0]
+                is_valid = four_line_down[latest["stock_id"] == stock_id].iloc[0]
 
-            existing = None
-            if history_df is not None and not history_df.empty:
-                existing_records = history_df[
-                    (history_df["stock_id"] == stock_id)
-                    & (history_df["signal_name"] == signal_name)
-                ]
-                if not existing_records.empty:
-                    existing = existing_records.iloc[-1]
+                existing = None
+                if history_df is not None and not history_df.empty:
+                    existing_records = history_df[
+                        (history_df["stock_id"] == stock_id)
+                        & (history_df["signal_name"] == signal_name)
+                    ]
+                    if not existing_records.empty:
+                        existing = existing_records.iloc[-1]
 
-            if is_valid:
-                trigger_date = (
-                    existing["trigger_date"] if existing is not None else stock_latest["date"]
-                )
-                validated_signals.append(
-                    {
-                        "stock_id": stock_id,
-                        "signal_name": signal_name,
-                        "signal_type": SIGNAL_TYPE_STATE,
-                        "score": SignalScore.FOUR_LINE_DOWN,
-                        "trigger_date": trigger_date,
-                        "last_valid_date": stock_latest["date"],
-                        "is_valid": True,
-                    }
-                )
-            elif existing is not None:
-                validated_signals.append(
-                    {
-                        "stock_id": stock_id,
-                        "signal_name": signal_name,
-                        "signal_type": SIGNAL_TYPE_STATE,
-                        "score": SignalScore.FOUR_LINE_DOWN,
-                        "trigger_date": existing["trigger_date"],
-                        "last_valid_date": existing.get("last_valid_date"),
-                        "is_valid": False,
-                    }
-                )
+                if is_valid:
+                    trigger_date = (
+                        existing["trigger_date"] if existing is not None else stock_latest["date"]
+                    )
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.FOUR_LINE_DOWN,
+                            "trigger_date": trigger_date,
+                            "last_valid_date": stock_latest["date"],
+                            "is_valid": True,
+                        }
+                    )
+                elif existing is not None:
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.FOUR_LINE_DOWN,
+                            "trigger_date": existing["trigger_date"],
+                            "last_valid_date": existing.get("last_valid_date"),
+                            "is_valid": False,
+                        }
+                    )
 
         # 7. MACD多頭（MACD和信號線>0且上升）
         signal_name = "MACD多頭"

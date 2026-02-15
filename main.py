@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import os
 from datetime import datetime
@@ -20,9 +21,18 @@ all = All()
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="twstock 股票分析")
+    parser.add_argument("--fast", action="store_true",
+                        help="快速模式：僅計算短線指標，跳過 MA60")
+    args = parser.parse_args()
+
+    fast_mode = args.fast
+    if fast_mode:
+        print("⚡ 快速模式：跳過 MA60 / 四線乖離 / 季線訊號")
+
     # 步驟 1: 更新股票數據
     await all.get_all_stock_list()
-    await all.get_all_stock_parallel()
+    await all.get_all_stock_parallel(fast_mode=fast_mode)
 
     # 步驟 2: 更新技術訊號
     print("\n📊 更新技術訊號...")

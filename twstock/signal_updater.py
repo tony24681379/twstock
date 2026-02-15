@@ -147,8 +147,8 @@ class SignalUpdater:
             Dict: {'updated': int, 'errors': int}
         """
         try:
-            # Step 1: 批次載入資料（200 天足夠計算所有指標）
-            bulk_data = await self.db.bulk_load_daily_data(stock_ids, days=200)
+            # Step 1: 批次載入資料（150 曆日 ≈ 103 交易日，足夠計算所有指標含 MA60）
+            bulk_data = await self.db.bulk_load_daily_data(stock_ids, days=150)
 
             if not bulk_data:
                 return {"updated": 0, "errors": len(stock_ids)}

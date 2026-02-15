@@ -20,7 +20,7 @@ class VectorizedIndicatorEngine:
     """向量化技術指標計算引擎"""
 
     @staticmethod
-    def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_all_indicators(df: pd.DataFrame, mode: str = 'full') -> pd.DataFrame:
         """批次計算所有技術指標
 
         使用向量化方法批次計算 2700 支股票的技術指標，
@@ -29,28 +29,18 @@ class VectorizedIndicatorEngine:
         Args:
             df: 包含所有股票的 DataFrame
                 Required columns: [stock_id, date, open, high, low, close, volume]
+            mode: 'full' = 所有指標（含 MA60）
+                  'short' = 僅短線指標（跳過 MA60）
 
         Returns:
             添加技術指標欄位的 DataFrame
-            Added columns: [ma5, ma10, ma20, ma60, macd, macd_signal, macd_hist,
-                          k9, d9, rsi, adx, bollinger_upper, bollinger_lower]
-
-        Example:
-            >>> df = pd.DataFrame({
-            ...     'stock_id': ['2330', '2330', '2454', '2454'],
-            ...     'date': ['2024-01-01', '2024-01-02', '2024-01-01', '2024-01-02'],
-            ...     'close': [500, 510, 100, 105],
-            ...     ...
-            ... })
-            >>> result = VectorizedIndicatorEngine.calculate_all_indicators(df)
-            >>> print(result.columns)
-            Index(['stock_id', 'date', 'close', 'ma5', 'ma10', ...])
         """
         # 確保排序（groupby 需要穩定順序）
         df = df.sort_values(['stock_id', 'date']).copy()
 
         # ✅ 批次計算移動平均（向量化）
-        for period in [5, 10, 20, 60]:
+        ma_periods = [5, 10, 20] if mode == 'short' else [5, 10, 20, 60]
+        for period in ma_periods:
             df[f'ma{period}'] = df.groupby('stock_id', observed=True)['close'].transform(
                 lambda x: talib.SMA(x.values, timeperiod=period)
             )
