@@ -336,9 +336,10 @@ class Stock(analytics.Analytics):
         self.calc_trend()
         self.season_upper_and_lower()
 
-        # 只依據核心短線指標 dropna，避免 MA60/ADX/ADXR 的 NaN 拖累行數
-        essential_cols = ['ma5', 'ma10', 'ma20', 'k9', 'd9', 'macd', 'macdsignal',
-                          'macdhist', 'bollinger_upper', 'bollinger_lower']
+        # 只依據核心短線指標 dropna，避免 MA60/ADX/ADXR/MACD 的長暖機期拖累行數
+        # MACD 需 33 行暖機（26+9-2），資料不足時會大幅減少可用行數
+        essential_cols = ['ma5', 'ma10', 'ma20', 'k9', 'd9',
+                          'bollinger_upper', 'bollinger_lower']
         self.daily_data = self.daily_data.dropna(subset=essential_cols, how="any")
 
     def calc_line_diff(self, mode='full'):

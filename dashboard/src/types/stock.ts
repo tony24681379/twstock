@@ -60,12 +60,86 @@ export interface StockListItem {
     fundamental: number
   }
 
+  // 可轉債套利分數
+  cb_arbitrage_score?: number | null  // 0-100，無 CB 為 null
+
   // 向後相容
   signal_strength: number // 映射為 overall_strength
   signals: ChipSignal[] // 完整訊號列表
   major_signals: string[] // 主要訊號列表
 
   last_updated: string
+}
+
+// 可轉債列表項目
+export interface ConvertibleBondListItem {
+  bond_id: string
+  name: string
+  underlying_stock_id: string
+  underlying_stock_name: string
+  close: number | null
+  conversion_price: number | null
+  conversion_value: number | null
+  premium_rate: number | null
+  arbitrage_spread: number | null
+  normalized_score: number
+  signal_count: number
+  risk_level: string
+  maturity_date: string | null
+  volume: number | null
+  last_updated: string | null
+}
+
+// 可轉債訊號
+export interface CBSignal {
+  name: string
+  triggered: boolean
+  score: number
+  description?: string
+}
+
+// 可轉債詳情
+export interface ConvertibleBondDetail {
+  bond_id: string
+  name: string
+  underlying_stock_id: string
+  underlying_stock_name: string
+  issue_date: string | null
+  maturity_date: string | null
+  put_date: string | null
+  put_price: number | null
+  coupon_rate: number | null
+  issued_amount: number | null
+  outstanding_amount: number | null
+  close: number | null
+  volume: number | null
+  conversion_price: number | null
+  conversion_value: number | null
+  premium_rate: number | null
+  arbitrage_spread: number | null
+  underlying_close: number | null
+  underlying_overall_strength: number
+  normalized_score: number
+  raw_score: number
+  signal_count: number
+  risk_level: string
+  signals: CBSignal[]
+}
+
+// 可轉債歷史資料點
+export interface ConvertibleBondHistoryPoint {
+  date: string
+  close: number | null
+  volume: number | null
+  conversion_value: number | null
+  premium_rate: number | null
+  underlying_close: number | null
+}
+
+// 可轉債列表回應
+export interface ConvertibleBondListResponse {
+  data: ConvertibleBondListItem[]
+  pagination: PaginationMetadata
 }
 
 export interface PaginationMetadata {

@@ -373,7 +373,7 @@ class All:
             print(f"   ✓ 已載入 {len(bulk_info_data)} 支股票的基本資訊")
 
         # 步驟4.5: 處理籌碼集中度數據（優先從 DB 載入）
-        concentration_data = {}
+        self._concentration_data = {}
         ENABLE_CONCENTRATION = (
             os.getenv("ENABLE_CONCENTRATION", "true").lower() == "true"
         )
@@ -395,22 +395,22 @@ class All:
                 print(
                     f"   載入 {len(stock_ids_for_concentration)} 支股票的集中度資料..."
                 )
-                concentration_data = (
+                self._concentration_data = (
                     await self.fetcher.db_manager.bulk_load_concentration_data(
                         stock_ids_for_concentration, weeks=10
                     )
                 )
-                print(f"   ✓ 已從 DB 載入 {len(concentration_data)} 支股票的集中度資料")
+                print(f"   ✓ 已從 DB 載入 {len(self._concentration_data)} 支股票的集中度資料")
 
             # Step 2: 檢查哪些股票需要從 API 更新（DB 沒有或資料過舊）
             stocks_need_api = []
             for sid in stock_ids_for_concentration:
-                if sid not in concentration_data:
+                if sid not in self._concentration_data:
                     # DB 沒有資料，需要從 API 抓取
                     stocks_need_api.append(sid)
                 else:
                     # 檢查資料是否過舊（超過 7 天）
-                    df = concentration_data[sid]
+                    df = self._concentration_data[sid]
                     if (
                         df.empty
                         or (datetime.datetime.now() - df.iloc[0]["date"]).days > 7
@@ -449,7 +449,7 @@ class All:
                     completed_count += 1
 
                     if not conc_df.empty:
-                        concentration_data[sid] = conc_df  # 更新字典
+                        self._concentration_data[sid] = conc_df  # 更新字典
                         api_success_count += 1
 
                     # 進度顯示（每 50 支）
@@ -473,7 +473,7 @@ class All:
                 print(f"   ✓ 所有股票資料皆從 DB 載入，無需 API 更新")
 
             elapsed = time.time() - concentration_start
-            print(f"   籌碼集中度處理完成: {len(concentration_data)} 支股票")
+            print(f"   籌碼集中度處理完成: {len(self._concentration_data)} 支股票")
             print(f"   耗時: {int(elapsed/60)}分{int(elapsed%60)}秒")
 
         # 步驟4.7: 檢測警示股/警告股（注意股、處置股）
@@ -515,7 +515,7 @@ class All:
         semaphore = asyncio.Semaphore(MAX_WORKERS)
 
         calc_mode = 'short' if fast_mode else 'full'
-        min_data_len = 30 if fast_mode else 60
+        min_data_len = 10 if fast_mode else 20
 
         async def process_with_semaphore(sid):
             async with semaphore:
@@ -594,171 +594,137 @@ class All:
         print(f"   分析耗時: {total_minutes}分{total_seconds}秒")
         print(f"   分析速度: {total_processed/total_time:.2f} 支/秒")
 
-        # 步驟6: 整理結果並生成 Excel 和 HTML
-        print(f"\n📊 整理資料並生成報表...")
-
-        name_list = {}
-        skill_list = {}
-        info_list = {}
-        daily_list = {}
-
-        # 收集所有結果
-        for id, skill, info, daily in iter(self.results):
-            skill_list[id] = skill
-            info_list[id] = info
-            daily_list[id] = daily
-
-        for l in self.list:
-            name_list[l["id"]] = l
-
-        # 生成 Excel
-        if len(skill_list) > 0:
-            print(f"   生成 Excel: {len(skill_list)} 支股票")
-
-            # 技術籌碼資料
-            skill_df = pd.DataFrame(dict(skill_list)).T
-            # 檢查是否已有 'id' 欄位，如果有則先刪除
-            if "id" in skill_df.columns:
-                skill_df = skill_df.drop(columns=["id"])
-            skill_list_excel = skill_df.reset_index().rename(columns={"index": "id"})
-
-            # 基本面資料
-            info_df = pd.DataFrame(dict(info_list)).T
-            # 檢查是否已有 'id' 欄位，如果有則先刪除
-            if "id" in info_df.columns:
-                info_df = info_df.drop(columns=["id"])
-            info_df = info_df.reset_index().rename(columns={"index": "id"})
-
-            info_list_excel = pd.merge(
-                skill_list_excel.iloc[:, :12],  # 只取前12個技術欄位
-                info_df,
-                on=["id"],
-                how="left",
-            )
-
-            # 刪除 capital 欄位（如果存在）
-            if "capital" in info_list_excel.columns:
-                del info_list_excel["capital"]
-
-            # 檢查並移除任何重複的欄位
-            duplicate_cols = info_list_excel.columns[
-                info_list_excel.columns.duplicated()
-            ].tolist()
-            if duplicate_cols:
-                print(f"   ⚠️  發現重複欄位: {duplicate_cols}，將自動移除")
-                info_list_excel = info_list_excel.loc[
-                    :, ~info_list_excel.columns.duplicated()
-                ]
-
-            # 極端漲跌資料
-            extreme_list_excel = skill_list_excel[
-                (skill_list_excel["最大漲幅"] > 9) | (skill_list_excel["最大跌幅"] < -9)
-            ]
-
-            # 統一按股票代碼排序
-            skill_list_excel = skill_list_excel.sort_values("id")
-            info_list_excel = info_list_excel.sort_values("id")
-            extreme_list_excel = extreme_list_excel.sort_values("id")
-
-            # 寫入 Excel（使用 openpyxl 引擎以支援條件格式）
-            excel_filename = date.today().strftime("%Y%m%d") + ".xlsx"
-            with pd.ExcelWriter(excel_filename, engine="openpyxl") as writer:
-                skill_list_excel.rename(columns=INDEX_COLUMN).to_excel(
-                    writer, sheet_name="技術籌碼", index=False
-                )
-                info_list_excel.rename(columns=INDEX_COLUMN).to_excel(
-                    writer, sheet_name="基本面", index=False
-                )
-                extreme_list_excel.rename(columns=INDEX_COLUMN).to_excel(
-                    writer, sheet_name="極端漲跌", index=False
-                )
-
-                # 新增：籌碼集中度相關 sheets
-                if ENABLE_CONCENTRATION and len(concentration_data) > 0:
-                    # Sheet 1: 每週籌碼變化（差值顯示）
-                    concentration_excel = self.prepare_concentration_excel(
-                        concentration_data
-                    )
-                    concentration_excel.to_excel(
-                        writer, sheet_name="每週籌碼變化", index=False
-                    )
-                    print(f"   ✓ 籌碼變化 sheet: {len(concentration_excel)} 支股票")
-
-                    # Sheet 2: 籌碼訊號（強化版）
-                    signal_excel_basic = self.generate_concentration_signals(
-                        concentration_data
-                    )
-
-                    # 計算訊號績效
-                    print("   📊 計算訊號回測績效...")
-                    performance_df = self.calculate_signal_performance(
-                        concentration_data
-                    )
-
-                    # 強化訊號 sheet（加入預期報酬、勝率等）
-                    signal_excel = self.enhance_signal_sheet(
-                        signal_excel_basic, performance_df
-                    )
-                    signal_excel.to_excel(writer, sheet_name="籌碼訊號", index=False)
-                    print(f"   ✓ 籌碼訊號 sheet: {len(signal_excel)} 支股票")
-
-            # 套用條件格式
-            if ENABLE_CONCENTRATION and len(concentration_data) > 0:
-                from openpyxl import load_workbook
-
-                wb = load_workbook(excel_filename)
-                wb = self.apply_concentration_formatting(
-                    wb, "每週籌碼變化", change_threshold=1.0
-                )
-                wb = self.apply_concentration_formatting(
-                    wb, "籌碼訊號", change_threshold=1.0
-                )
-                wb.save(excel_filename)
-
-            print(f"   ✓ Excel 已儲存: {excel_filename}")
-        else:
-            print("   ⚠️  沒有可用的股票資料")
-
         endTime = time.time()
         total_minutes = int((endTime - startTime) / 60)
         total_seconds = int((endTime - startTime) % 60)
-        print(f"\n⏱️  總執行時間: {total_minutes}分{total_seconds}秒")
+        print(f"\n⏱️  資料獲取+分析總時間: {total_minutes}分{total_seconds}秒")
 
-        # ========== 自動清理舊資料 ==========
-        try:
-            # 只在 production 環境執行自動清理
-            environment = os.getenv("ENVIRONMENT", "development")
-            retention_days = int(os.getenv("DATA_RETENTION_DAYS", "250"))
+    def generate_excel(self, excel_path=None):
+        """從分析結果生成 Excel 報表
 
-            if environment == "production" and retention_days > 0:
-                print("🗑️  開始自動清理舊資料...")
-                # 檢查是否有 db_manager
-                if hasattr(self.fetcher, "db_manager") and self.fetcher.db_manager:
-                    cleanup_result = await self.fetcher.db_manager.auto_cleanup_old_data(
-                        retention_days=retention_days, vacuum=True  # 自動執行 VACUUM
-                    )
-                else:
-                    print("   ⚠️  資料庫管理器未初始化，跳過清理")
-                    cleanup_result = {"status": "skipped", "reason": "No db_manager"}
+        須在 get_all_stock_parallel() 完成後呼叫。
 
-                if cleanup_result.get("status") == "completed":
-                    total_deleted = sum(
-                        v
-                        for v in cleanup_result.get("deleted_counts", {}).values()
-                        if isinstance(v, int)
-                    )
-                    print(f"✅ 自動清理完成，刪除 {total_deleted:,} 行資料")
-                else:
-                    print(
-                        f"⏭️  自動清理跳過：{cleanup_result.get('reason', 'unknown')}"
-                    )
-            else:
-                print(f"⏭️  自動清理跳過（環境：{environment}，保留天數：{retention_days}）")
+        Args:
+            excel_path: Excel 檔案路徑，預設為 {today}.xlsx
 
-        except Exception as e:
-            # 清理失敗不影響主流程
-            print(f"❌ 自動清理失敗（不影響主流程）: {e}")
-        # =======================================
+        Returns:
+            str: 生成的 Excel 檔案路徑，如果沒有資料則回傳 None
+        """
+        if excel_path is None:
+            excel_path = date.today().strftime("%Y%m%d") + ".xlsx"
+
+        print(f"\n📊 整理資料並生成報表...")
+
+        skill_list = {}
+        info_list = {}
+
+        for id, skill, info, daily in iter(self.results):
+            skill_list[id] = skill
+            info_list[id] = info
+
+        if not skill_list:
+            print("   ⚠️  沒有可用的股票資料")
+            return None
+
+        print(f"   生成 Excel: {len(skill_list)} 支股票")
+
+        # 技術籌碼資料
+        skill_df = pd.DataFrame(dict(skill_list)).T
+        if "id" in skill_df.columns:
+            skill_df = skill_df.drop(columns=["id"])
+        skill_list_excel = skill_df.reset_index().rename(columns={"index": "id"})
+
+        # 基本面資料
+        info_df = pd.DataFrame(dict(info_list)).T
+        if "id" in info_df.columns:
+            info_df = info_df.drop(columns=["id"])
+        info_df = info_df.reset_index().rename(columns={"index": "id"})
+
+        info_list_excel = pd.merge(
+            skill_list_excel.iloc[:, :12],
+            info_df,
+            on=["id"],
+            how="left",
+        )
+
+        if "capital" in info_list_excel.columns:
+            del info_list_excel["capital"]
+
+        duplicate_cols = info_list_excel.columns[
+            info_list_excel.columns.duplicated()
+        ].tolist()
+        if duplicate_cols:
+            print(f"   ⚠️  發現重複欄位: {duplicate_cols}，將自動移除")
+            info_list_excel = info_list_excel.loc[
+                :, ~info_list_excel.columns.duplicated()
+            ]
+
+        # 極端漲跌資料
+        extreme_list_excel = skill_list_excel[
+            (skill_list_excel["最大漲幅"] > 9) | (skill_list_excel["最大跌幅"] < -9)
+        ]
+
+        # 統一按股票代碼排序
+        skill_list_excel = skill_list_excel.sort_values("id")
+        info_list_excel = info_list_excel.sort_values("id")
+        extreme_list_excel = extreme_list_excel.sort_values("id")
+
+        concentration_data = getattr(self, "_concentration_data", {})
+        enable_concentration = (
+            os.getenv("ENABLE_CONCENTRATION", "true").lower() == "true"
+        )
+
+        # 寫入 Excel（使用 openpyxl 引擎以支援條件格式）
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            skill_list_excel.rename(columns=INDEX_COLUMN).to_excel(
+                writer, sheet_name="技術籌碼", index=False
+            )
+            info_list_excel.rename(columns=INDEX_COLUMN).to_excel(
+                writer, sheet_name="基本面", index=False
+            )
+            extreme_list_excel.rename(columns=INDEX_COLUMN).to_excel(
+                writer, sheet_name="極端漲跌", index=False
+            )
+
+            if enable_concentration and len(concentration_data) > 0:
+                concentration_excel = self.prepare_concentration_excel(
+                    concentration_data
+                )
+                concentration_excel.to_excel(
+                    writer, sheet_name="每週籌碼變化", index=False
+                )
+                print(f"   ✓ 籌碼變化 sheet: {len(concentration_excel)} 支股票")
+
+                signal_excel_basic = self.generate_concentration_signals(
+                    concentration_data
+                )
+
+                print("   📊 計算訊號回測績效...")
+                performance_df = self.calculate_signal_performance(
+                    concentration_data
+                )
+
+                signal_excel = self.enhance_signal_sheet(
+                    signal_excel_basic, performance_df
+                )
+                signal_excel.to_excel(writer, sheet_name="籌碼訊號", index=False)
+                print(f"   ✓ 籌碼訊號 sheet: {len(signal_excel)} 支股票")
+
+        # 套用條件格式
+        if enable_concentration and len(concentration_data) > 0:
+            from openpyxl import load_workbook
+
+            wb = load_workbook(excel_path)
+            wb = self.apply_concentration_formatting(
+                wb, "每週籌碼變化", change_threshold=1.0
+            )
+            wb = self.apply_concentration_formatting(
+                wb, "籌碼訊號", change_threshold=1.0
+            )
+            wb.save(excel_path)
+
+        print(f"   ✓ Excel 已儲存: {excel_path}")
+        return excel_path
 
     def prepare_concentration_excel(self, concentration_data):
         """將籌碼集中度數據轉換為 Excel 格式（顯示週變化量）"""

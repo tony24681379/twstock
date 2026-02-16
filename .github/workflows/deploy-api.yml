@@ -1,0 +1,131 @@
+name: Deploy API to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'api/**'
+      - 'twstock/**'
+      - 'pyproject.toml'
+      - 'docker/api/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '部署環境'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - dev
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-east1
+  SERVICE_NAME: twstock-api
+  REGISTRY: asia-east1-docker.pkg.dev
+  REPOSITORY: twstock-docker
+  IMAGE_NAME: api
+
+jobs:
+  build-and-deploy:
+    name: 構建並部署 API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_default_credentials: true
+
+      - name: 配置 Docker 認證
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: 取得短 SHA
+        id: vars
+        run: |
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: 構建 Docker 映像
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:latest \
+            -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short_sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.timestamp }} \
+            -f docker/api/Dockerfile .
+
+      - name: 推送 Docker 映像
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.short_sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.timestamp }}
+
+      - name: 部署到 Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}:latest \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --set-secrets=DATABASE_URL=database_url:latest,REDIS_URL=redis_url:latest \
+            --cpu=2 \
+            --memory=2Gi \
+            --min-instances=0 \
+            --max-instances=10 \
+            --timeout=300s \
+            --labels=app=twstock,env=prod,deployed-by=github-actions \
+            --quiet
+
+      - name: 取得服務 URL
+        id: deploy
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --format='value(status.url)')
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "✅ 部署成功！API URL: $SERVICE_URL"
+
+      - name: 健康檢查
+        run: |
+          echo "🔍 執行健康檢查..."
+          sleep 10
+          HEALTH_URL="${{ steps.deploy.outputs.url }}/api/health"
+
+          for i in {1..5}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL)
+            if [ $HTTP_CODE -eq 200 ]; then
+              echo "✅ 健康檢查通過 (HTTP $HTTP_CODE)"
+              curl -s $HEALTH_URL | jq '.'
+              exit 0
+            fi
+            echo "⏳ 等待服務啟動... ($i/5)"
+            sleep 10
+          done
+
+          echo "❌ 健康檢查失敗"
+          exit 1
+
+      - name: 部署摘要
+        if: success()
+        run: |
+          echo "## 🚀 API 部署成功" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **服務 URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **映像標籤**: latest, ${{ steps.vars.outputs.short_sha }}, ${{ steps.vars.outputs.timestamp }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **區域**: ${{ env.REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **部署時間**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 檢查清單" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Docker 映像已構建並推送" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Cloud Run 服務已部署" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] 健康檢查通過" >> $GITHUB_STEP_SUMMARY

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.config import ALLOWED_ORIGINS, API_DESCRIPTION, API_TITLE, API_VERSION
-from api.routers import cache, stocks
+from api.routers import cache, convertible, stocks
 from twstock.database import DatabaseManager
 from api.cache import RedisClient
 
@@ -109,7 +109,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # 註冊路由
 app.include_router(stocks.router)
-app.include_router(cache.router)  # 🆕 快取管理 API
+app.include_router(convertible.router)
+app.include_router(cache.router)
 
 
 @app.get("/")

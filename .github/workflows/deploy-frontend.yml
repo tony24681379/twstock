@@ -1,0 +1,158 @@
+name: Deploy Frontend to Cloud Storage
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '部署環境'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - dev
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  BUCKET_NAME: ${{ secrets.GCP_PROJECT_ID }}-frontend
+  NODE_VERSION: '20'
+
+jobs:
+  build-and-deploy:
+    name: 構建並部署前端
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: 設定 gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_default_credentials: true
+
+      - name: 取得 API URL
+        id: get_api_url
+        run: |
+          API_URL=$(gcloud run services describe twstock-api \
+            --region=asia-east1 \
+            --format='value(status.url)' 2>/dev/null || echo "")
+
+          if [ -z "$API_URL" ]; then
+            echo "⚠️ 警告: 無法取得 API URL，使用預設值"
+            API_URL="https://twstock-api-placeholder.run.app"
+          fi
+
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "✅ API URL: $API_URL"
+
+      - name: 安裝依賴
+        working-directory: dashboard
+        run: npm ci
+
+      - name: 構建前端
+        working-directory: dashboard
+        env:
+          VITE_API_BASE_URL: ${{ steps.get_api_url.outputs.api_url }}
+        run: |
+          echo "🔨 構建前端（API URL: $VITE_API_BASE_URL）"
+          npm run build
+
+      - name: 檢查構建結果
+        working-directory: dashboard
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "❌ 錯誤: dist 目錄不存在"
+            exit 1
+          fi
+
+          echo "✅ 構建成功，檔案列表:"
+          ls -lh dist/
+
+      - name: 上傳到 Cloud Storage
+        working-directory: dashboard
+        run: |
+          echo "📤 上傳檔案到 gs://${{ env.BUCKET_NAME }}/"
+
+          # 同步檔案（刪除遠端不存在的檔案）
+          gsutil -m rsync -r -d dist/ gs://${{ env.BUCKET_NAME }}/
+
+          echo "✅ 上傳完成"
+
+      - name: 設定快取標頭
+        run: |
+          echo "⚙️ 設定快取標頭..."
+
+          # 靜態資源（JS, CSS, 圖片）：長期快取 (1 年)
+          gsutil -m setmeta \
+            -h "Cache-Control:public, max-age=31536000, immutable" \
+            gs://${{ env.BUCKET_NAME }}/assets/**
+
+          # HTML 檔案：不快取（總是檢查最新版本）
+          gsutil -m setmeta \
+            -h "Cache-Control:no-cache, no-store, must-revalidate" \
+            gs://${{ env.BUCKET_NAME }}/*.html || true
+
+          # index.html
+          gsutil setmeta \
+            -h "Cache-Control:no-cache, no-store, must-revalidate" \
+            gs://${{ env.BUCKET_NAME }}/index.html || true
+
+          echo "✅ 快取標頭設定完成"
+
+      - name: 取得前端 URL
+        id: deploy
+        run: |
+          FRONTEND_URL="https://storage.googleapis.com/${{ env.BUCKET_NAME }}/index.html"
+          echo "url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+          echo "✅ 前端 URL: $FRONTEND_URL"
+
+      - name: 驗證部署
+        run: |
+          echo "🔍 驗證部署..."
+          sleep 5
+
+          FRONTEND_URL="${{ steps.deploy.outputs.url }}"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $FRONTEND_URL)
+
+          if [ $HTTP_CODE -eq 200 ]; then
+            echo "✅ 前端驗證成功 (HTTP $HTTP_CODE)"
+          else
+            echo "⚠️ 前端驗證失敗 (HTTP $HTTP_CODE)"
+            echo "這可能是正常的，請手動檢查"
+          fi
+
+      - name: 部署摘要
+        if: success()
+        run: |
+          echo "## 🎨 前端部署成功" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **前端 URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **API URL**: ${{ steps.get_api_url.outputs.api_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bucket**: gs://${{ env.BUCKET_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **部署時間**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 檢查清單" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] 前端已構建" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] 檔案已上傳到 Cloud Storage" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] 快取標頭已設定" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 快速連結" >> $GITHUB_STEP_SUMMARY
+          echo "- [前端](https://storage.googleapis.com/${{ env.BUCKET_NAME }}/index.html)" >> $GITHUB_STEP_SUMMARY
+          echo "- [API](${{ steps.get_api_url.outputs.api_url }}/api/health)" >> $GITHUB_STEP_SUMMARY

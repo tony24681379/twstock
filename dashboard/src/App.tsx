@@ -7,6 +7,8 @@ import { LoginPage } from './pages/LoginPage'
 // Code Splitting: 延遲載入頁面元件
 const HomePage = lazy(() => import('./pages/HomePage'))
 const StockDetailPage = lazy(() => import('./pages/StockDetailPage'))
+const ConvertiblePage = lazy(() => import('./pages/ConvertiblePage'))
+const ConvertibleDetailPage = lazy(() => import('./pages/ConvertibleDetailPage'))
 
 // Loading 元件
 function PageLoading() {
@@ -33,6 +35,8 @@ function App() {
                 <Routes>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/stocks/:stockId" element={<StockDetailPage />} />
+                  <Route path="/convertible" element={<ConvertiblePage />} />
+                  <Route path="/convertible/:bondId" element={<ConvertibleDetailPage />} />
                 </Routes>
               </Suspense>
             </Layout>

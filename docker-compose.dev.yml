@@ -1,0 +1,15 @@
+# 開發模式：mount 本地代碼，支援熱重載
+# 使用方式：docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api:
+    volumes:
+      # Mount 本地代碼目錄到容器內
+      - ./twstock:/app/twstock:ro
+      - ./api:/app/api:ro
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      LOG_LEVEL: DEBUG
+      PYTHONUNBUFFERED: "1"
+      REQUIRE_AUTH: "false"
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:5174"

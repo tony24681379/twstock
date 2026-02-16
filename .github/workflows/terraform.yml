@@ -1,0 +1,145 @@
+name: Terraform Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform 動作'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  TF_VERSION: '1.5.0'
+  TF_WORKING_DIR: terraform
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event.inputs.action || 'plan' }}
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: 設定 gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_default_credentials: true
+
+      - name: 建立 terraform.tfvars
+        run: |
+          cat > terraform.tfvars <<EOF
+          project_id   = "${{ secrets.GCP_PROJECT_ID }}"
+          region       = "asia-east1"
+          database_url = "${{ secrets.DATABASE_URL }}"
+          redis_url    = "${{ secrets.REDIS_URL }}"
+          EOF
+
+          echo "✅ terraform.tfvars 已建立"
+
+      - name: Terraform Init
+        run: |
+          terraform init
+          echo "✅ Terraform 初始化完成"
+
+      - name: Terraform Format Check
+        run: |
+          terraform fmt -check -recursive || {
+            echo "❌ 格式檢查失敗，請執行 'terraform fmt -recursive'"
+            exit 1
+          }
+
+      - name: Terraform Validate
+        run: |
+          terraform validate
+          echo "✅ Terraform 驗證通過"
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -out=tfplan -var-file=environments/prod.tfvars
+          echo "✅ Terraform Plan 完成"
+
+      - name: 顯示 Plan 摘要
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('${{ env.TF_WORKING_DIR }}/tfplan.txt', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan\n\n\`\`\`\n${planOutput}\n\`\`\``
+            });
+
+      - name: Terraform Apply
+        if: |
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action == 'apply' &&
+          github.ref == 'refs/heads/main'
+        run: |
+          terraform apply -auto-approve tfplan
+          echo "✅ Terraform Apply 完成"
+
+      - name: Terraform Destroy
+        if: |
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.action == 'destroy' &&
+          github.ref == 'refs/heads/main'
+        run: |
+          terraform destroy -auto-approve -var-file=environments/prod.tfvars
+          echo "✅ Terraform Destroy 完成"
+
+      - name: 清理敏感檔案
+        if: always()
+        run: |
+          rm -f terraform.tfvars tfplan
+          echo "✅ 敏感檔案已清理"
+
+      - name: 操作摘要
+        if: success()
+        run: |
+          ACTION="${{ github.event.inputs.action || 'plan' }}"
+          echo "## 🏗️ Terraform $ACTION 完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **動作**: $ACTION" >> $GITHUB_STEP_SUMMARY
+          echo "- **專案**: ${{ secrets.GCP_PROJECT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **區域**: asia-east1" >> $GITHUB_STEP_SUMMARY
+          echo "- **執行時間**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ⚠️ 注意事項" >> $GITHUB_STEP_SUMMARY
+          echo "- 基礎設施變更會影響正式環境" >> $GITHUB_STEP_SUMMARY
+          echo "- Apply 和 Destroy 僅能在 main 分支手動觸發" >> $GITHUB_STEP_SUMMARY
+          echo "- 請確保已充分測試再執行 apply" >> $GITHUB_STEP_SUMMARY

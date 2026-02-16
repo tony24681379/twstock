@@ -84,6 +84,11 @@ class StockListItem(BaseModel):
         default_factory=list, description="主要訊號列表（向後相容）"
     )
 
+    # 可轉債套利分數
+    cb_arbitrage_score: Optional[int] = Field(
+        None, description="可轉債套利評分 (0-100)，無 CB 為 null"
+    )
+
     last_updated: datetime = Field(..., description="最後更新時間")
 
     class Config:

@@ -76,6 +76,7 @@ async def list_stocks(
         "expected_return",
         "win_rate",
         "signal_count",
+        "cb_arbitrage_score",
     ]
     if sort_by not in allowed_sort_fields:
         raise HTTPException(
@@ -250,6 +251,30 @@ async def get_stock_fundamental(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/{stock_id}/convertible")
+async def get_stock_convertible_bonds(
+    stock_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    user: Optional[AuthUser] = Depends(get_current_user),
+):
+    """取得股票關聯的可轉債列表"""
+    from sqlalchemy import text as sa_text
+
+    result = await session.execute(
+        sa_text("""
+            SELECT cb.bond_id, cb.name,
+                   COALESCE(s.normalized_score, 0) as normalized_score,
+                   s.premium_rate, s.risk_level
+            FROM convertible_bond cb
+            LEFT JOIN convertible_bond_signals s ON cb.bond_id = s.bond_id
+            WHERE cb.underlying_stock_id = :stock_id AND cb.is_active = true
+            ORDER BY COALESCE(s.normalized_score, 0) DESC
+        """),
+        {"stock_id": stock_id.lower()},
+    )
+    return [dict(row._mapping) for row in result.fetchall()]
 
 
 @router.get("/{stock_id}", response_model=StockDetail)

@@ -390,6 +390,11 @@ class StockService:
         alert_status_dict = await api_db_manager.bulk_load_alert_status(stock_ids)
         print(f"⏱️  bulk_load_alert_status: {time.time() - t_alert:.2f}s", file=sys.stderr, flush=True)
 
+        # 🆕 批次載入可轉債套利分數
+        t_cb = time.time()
+        cb_score_map = await api_db_manager.get_cb_signals_by_underlying()
+        print(f"⏱️  get_cb_signals_by_underlying: {time.time() - t_cb:.2f}s", file=sys.stderr, flush=True)
+
         # 組裝回應資料（整合籌碼 + 技術 + 基本面）
         items = []
         for stock_list, stock_info, close_price, last_date in rows:
@@ -564,6 +569,8 @@ class StockService:
                     win_rate=win_rate,
                     risk_level=risk_level,
                     major_signals=major_signals,
+                    # 可轉債套利分數
+                    cb_arbitrage_score=cb_score_map.get(stock_id),
                     # 向後相容
                     signal_strength=overall_strength,
                     last_updated=last_date if last_date else datetime.now(),
@@ -576,12 +583,13 @@ class StockService:
             sort_key_map = {
                 "chip_strength": lambda x: x.chip_strength,
                 "technical_strength": lambda x: x.technical_strength,
-                "fundamental_strength": lambda x: x.fundamental_strength,  # 新增
+                "fundamental_strength": lambda x: x.fundamental_strength,
                 "overall_strength": lambda x: x.overall_strength,
                 "signal_strength": lambda x: x.signal_strength,  # 向後相容
                 "expected_return": lambda x: x.expected_return,
                 "win_rate": lambda x: x.win_rate,
                 "signal_count": lambda x: x.signal_count,
+                "cb_arbitrage_score": lambda x: (x.cb_arbitrage_score is not None, x.cb_arbitrage_score or 0),
             }
 
             # 排序

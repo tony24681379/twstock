@@ -12,8 +12,8 @@ RUN apt-get update && \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# 安裝 Poetry 2.2.1 和 export 插件（與本機環境一致）
-RUN pip install --no-cache-dir poetry==2.2.1 poetry-plugin-export==1.9.0
+# 安裝 Poetry 2.3.2 和 export 插件（與本機環境一致）
+RUN pip install --no-cache-dir poetry==2.3.2 poetry-plugin-export==1.10.0
 
 # 複製依賴檔案（利用 Docker layer cache）
 COPY pyproject.toml poetry.lock ./

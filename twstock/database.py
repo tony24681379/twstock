@@ -369,6 +369,78 @@ class StockUpdateTracker(Base):
     )
 
 
+class ConvertibleBond(Base):
+    """可轉換公司債基本資訊表"""
+
+    __tablename__ = "convertible_bond"
+
+    bond_id = Column(String, primary_key=True, index=True, comment="可轉債代碼")
+    name = Column(String, comment="可轉債名稱")
+    underlying_stock_id = Column(String, index=True, comment="標的股票代碼")
+    conversion_price = Column(Float, comment="轉換價格")
+    issue_date = Column(DateTime, comment="發行日期")
+    maturity_date = Column(DateTime, comment="到期日期")
+    put_date = Column(DateTime, nullable=True, comment="下次賣回日")
+    put_price = Column(Float, nullable=True, comment="賣回價格")
+    coupon_rate = Column(Float, comment="票面利率")
+    issued_amount = Column(Float, comment="發行總額（張）")
+    outstanding_amount = Column(Float, comment="流通在外餘額（張）")
+    is_active = Column(Boolean, default=True, comment="是否仍在交易")
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_cb_underlying", "underlying_stock_id"),
+        Index("idx_cb_active", "is_active"),
+    )
+
+
+class ConvertibleBondDaily(Base):
+    """可轉債每日交易資料表"""
+
+    __tablename__ = "convertible_bond_daily"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    bond_id = Column(String, nullable=False, index=True, comment="可轉債代碼")
+    date = Column(DateTime, nullable=False, comment="交易日期")
+    open = Column(Float, comment="開盤價")
+    high = Column(Float, comment="最高價")
+    low = Column(Float, comment="最低價")
+    close = Column(Float, comment="收盤價（面額基準）")
+    volume = Column(Float, comment="成交量")
+    underlying_close = Column(Float, comment="標的股收盤價")
+    conversion_value = Column(Float, comment="轉換價值")
+    premium_rate = Column(Float, comment="溢價率 (%)")
+    arbitrage_spread = Column(Float, comment="套利空間 (%)")
+
+    __table_args__ = (
+        Index("idx_cb_daily_bond_date", "bond_id", "date", unique=True),
+        Index("idx_cb_daily_date", "date"),
+    )
+
+
+class ConvertibleBondSignals(Base):
+    """可轉債套利訊號表"""
+
+    __tablename__ = "convertible_bond_signals"
+
+    bond_id = Column(String, primary_key=True, index=True, comment="可轉債代碼")
+    date = Column(DateTime, comment="計算日期")
+    raw_score = Column(Integer, comment="原始分數")
+    normalized_score = Column(Integer, comment="標準化分數 (0-100)")
+    signal_count = Column(Integer, comment="觸發訊號數")
+    risk_level = Column(String, comment="風險等級")
+    signals_json = Column(JSONB, comment="訊號詳情")
+    underlying_stock_id = Column(String, index=True, comment="標的股代碼")
+    premium_rate = Column(Float, comment="最新溢價率 (%)")
+    conversion_value = Column(Float, comment="最新轉換價值")
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_cb_signals_score", "normalized_score"),
+        Index("idx_cb_signals_underlying", "underlying_stock_id"),
+    )
+
+
 class DatabaseManager:
     """PostgreSQL 資料庫管理器"""
 
@@ -1965,6 +2037,175 @@ class DatabaseManager:
             )
             row = result.fetchone()
             return dict(row._mapping) if row else None
+
+    # ========== 可轉債批次操作 ==========
+
+    async def save_convertible_bonds(self, bonds: list[dict]):
+        """批次儲存可轉債基本資訊"""
+        if not bonds:
+            return
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                await session.execute(
+                    text("""
+                        INSERT INTO convertible_bond
+                        (bond_id, name, underlying_stock_id, conversion_price,
+                         issue_date, maturity_date, put_date, put_price,
+                         coupon_rate, issued_amount, outstanding_amount, is_active, updated_at)
+                        VALUES (:bond_id, :name, :underlying_stock_id, :conversion_price,
+                                :issue_date, :maturity_date, :put_date, :put_price,
+                                :coupon_rate, :issued_amount, :outstanding_amount, :is_active, :updated_at)
+                        ON CONFLICT (bond_id) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            conversion_price = EXCLUDED.conversion_price,
+                            outstanding_amount = EXCLUDED.outstanding_amount,
+                            is_active = EXCLUDED.is_active,
+                            updated_at = EXCLUDED.updated_at
+                    """),
+                    bonds,
+                )
+
+    async def save_convertible_bond_daily(self, records: list[dict]):
+        """批次儲存可轉債每日交易資料"""
+        if not records:
+            return
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                await session.execute(
+                    text("""
+                        INSERT INTO convertible_bond_daily
+                        (bond_id, date, open, high, low, close, volume,
+                         underlying_close, conversion_value, premium_rate, arbitrage_spread)
+                        VALUES (:bond_id, :date, :open, :high, :low, :close, :volume,
+                                :underlying_close, :conversion_value, :premium_rate, :arbitrage_spread)
+                        ON CONFLICT (bond_id, date) DO UPDATE SET
+                            close = EXCLUDED.close,
+                            volume = EXCLUDED.volume,
+                            underlying_close = EXCLUDED.underlying_close,
+                            conversion_value = EXCLUDED.conversion_value,
+                            premium_rate = EXCLUDED.premium_rate,
+                            arbitrage_spread = EXCLUDED.arbitrage_spread
+                    """),
+                    records,
+                )
+
+    async def save_convertible_bond_signals(self, signals: list[dict]):
+        """批次儲存可轉債套利訊號"""
+        if not signals:
+            return
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                await session.execute(
+                    text("""
+                        INSERT INTO convertible_bond_signals
+                        (bond_id, date, raw_score, normalized_score, signal_count,
+                         risk_level, signals_json, underlying_stock_id,
+                         premium_rate, conversion_value, updated_at)
+                        VALUES (:bond_id, :date, :raw_score, :normalized_score, :signal_count,
+                                :risk_level, :signals_json, :underlying_stock_id,
+                                :premium_rate, :conversion_value, :updated_at)
+                        ON CONFLICT (bond_id) DO UPDATE SET
+                            date = EXCLUDED.date,
+                            raw_score = EXCLUDED.raw_score,
+                            normalized_score = EXCLUDED.normalized_score,
+                            signal_count = EXCLUDED.signal_count,
+                            risk_level = EXCLUDED.risk_level,
+                            signals_json = EXCLUDED.signals_json,
+                            premium_rate = EXCLUDED.premium_rate,
+                            conversion_value = EXCLUDED.conversion_value,
+                            updated_at = EXCLUDED.updated_at
+                    """),
+                    signals,
+                )
+
+    async def bulk_load_convertible_bond_daily(
+        self, bond_ids: list[str], days: int = 250
+    ) -> dict[str, pd.DataFrame]:
+        """批次載入可轉債每日交易資料"""
+        if not bond_ids:
+            return {}
+        async with self.get_session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT bond_id, date, open, high, low, close, volume,
+                           underlying_close, conversion_value, premium_rate, arbitrage_spread
+                    FROM convertible_bond_daily
+                    WHERE bond_id = ANY(:bond_ids)
+                      AND date >= NOW() - INTERVAL ':days days'
+                    ORDER BY bond_id, date
+                """.replace(":days days", f"{days} days")),
+                {"bond_ids": bond_ids},
+            )
+            rows = result.fetchall()
+
+        data_map = {}
+        for row in rows:
+            row_dict = dict(row._mapping)
+            bid = row_dict["bond_id"]
+            if bid not in data_map:
+                data_map[bid] = []
+            data_map[bid].append(row_dict)
+
+        return {bid: pd.DataFrame(records) for bid, records in data_map.items()}
+
+    async def bulk_check_cb_needs_update(self, bond_ids: list[str]) -> dict[str, bool]:
+        """批次檢查哪些可轉債需要更新（DB 最新日期 < 今天）"""
+        if not bond_ids:
+            return {}
+        async with self.get_session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT bond_id, MAX(date) as latest_date
+                    FROM convertible_bond_daily
+                    WHERE bond_id = ANY(:bond_ids)
+                    GROUP BY bond_id
+                """),
+                {"bond_ids": bond_ids},
+            )
+            rows = result.fetchall()
+
+        latest_dates = {row._mapping["bond_id"]: row._mapping["latest_date"] for row in rows}
+        today = date.today()
+        needs_update = {}
+        for bid in bond_ids:
+            if bid not in latest_dates:
+                needs_update[bid] = True
+            else:
+                db_date = latest_dates[bid]
+                if hasattr(db_date, "date"):
+                    db_date = db_date.date()
+                needs_update[bid] = db_date < today
+        return needs_update
+
+    async def get_all_convertible_bonds(self, active_only: bool = True) -> list[dict]:
+        """取得所有可轉債基本資訊"""
+        async with self.get_session() as session:
+            where = "WHERE is_active = true" if active_only else ""
+            result = await session.execute(
+                text(f"""
+                    SELECT bond_id, name, underlying_stock_id, conversion_price,
+                           issue_date, maturity_date, put_date, put_price,
+                           coupon_rate, issued_amount, outstanding_amount, is_active
+                    FROM convertible_bond {where}
+                    ORDER BY bond_id
+                """)
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+
+    async def get_cb_signals_by_underlying(self) -> dict[str, int]:
+        """取得 underlying_stock_id → max(normalized_score) 映射"""
+        async with self.get_session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT underlying_stock_id, MAX(normalized_score) as cb_arbitrage_score
+                    FROM convertible_bond_signals
+                    GROUP BY underlying_stock_id
+                """)
+            )
+            return {
+                row._mapping["underlying_stock_id"]: row._mapping["cb_arbitrage_score"]
+                for row in result.fetchall()
+            }
 
     async def auto_cleanup_old_data(
         self, retention_days: int = 250, vacuum: bool = True
