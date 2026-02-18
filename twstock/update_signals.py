@@ -5,9 +5,9 @@
 用於更新 stock_technical_signals 表，計算所有股票的技術指標訊號。
 
 使用方式：
-    poetry run python update_signals.py              # 增量更新
-    poetry run python update_signals.py --force      # 強制全部更新
-    poetry run python update_signals.py --stocks 2330 2454  # 更新特定股票
+    poetry run python -m twstock.update_signals              # 增量更新
+    poetry run python -m twstock.update_signals --force      # 強制全部更新
+    poetry run python -m twstock.update_signals --stocks 2330 2454  # 更新特定股票
 """
 
 import asyncio
@@ -84,9 +84,9 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 範例：
-  poetry run python update_signals.py                    # 增量更新
-  poetry run python update_signals.py --force            # 強制全部更新
-  poetry run python update_signals.py --stocks 2330 2454 # 更新特定股票
+  poetry run python -m twstock.update_signals                    # 增量更新
+  poetry run python -m twstock.update_signals --force            # 強制全部更新
+  poetry run python -m twstock.update_signals --stocks 2330 2454 # 更新特定股票
         """
     )
 

@@ -19,8 +19,7 @@ RUN pip install --no-cache-dir poetry==2.3.2 poetry-plugin-export==1.10.0
 COPY pyproject.toml poetry.lock ./
 
 # 匯出 requirements.txt（只匯出主要依賴，不包含開發依賴組）
-RUN poetry export -f requirements.txt -o requirements.txt --only main --without-hashes || \
-    poetry export -f requirements.txt -o requirements.txt --without-hashes
+RUN poetry export -f requirements.txt -o requirements.txt --only main,api --without-hashes
 
 # 安裝 Python 依賴並建立 wheels
 RUN pip wheel --no-cache-dir --wheel-dir /build/wheels -r requirements.txt
