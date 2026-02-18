@@ -435,7 +435,8 @@ POST /api/maintenance/cleanup
 **訊號計算**：
 - 10 個籌碼訊號 (SignalService)
 - 10 個基本面訊號 (FundamentalSignalService)
-- 技術指標 (IndicatorService)
+- 27 個技術訊號 (VectorizedSignalDetector)
+- **完整定義見 [`docs/SIGNAL_DEFINITIONS.md`](docs/SIGNAL_DEFINITIONS.md)**（唯一權威來源，修改分數前必須先更新此文件）
 
 ---
 
@@ -739,6 +740,9 @@ allowed_origins = "https://twstock.changes.live,https://twstock-484714.web.app,h
 ### 認證與安全
 - `docs/AUTH_SETUP.md` - Google OAuth 2.0 身份驗證設定
 - `docs/GOOGLE_OAUTH_SETUP.md` - Google OAuth Client ID 申請流程
+
+### 訊號定義
+- `docs/SIGNAL_DEFINITIONS.md` - 訊號定義與評分標準（唯一權威來源）
 
 ### 資料管理
 - `docs/DATA_RETENTION.md` - 資料保留策略（本地 vs 線上）

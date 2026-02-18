@@ -441,6 +441,55 @@ class ConvertibleBondSignals(Base):
     )
 
 
+class StockListCache(Base):
+    """股票列表預計算快取表
+
+    預先計算三維分數（籌碼/技術/基本面），API 查詢時僅需 SQL SELECT + 動態加權排序分頁。
+    消除 /api/stocks endpoint 的 OOM 問題。
+    """
+
+    __tablename__ = "stock_list_cache"
+
+    stock_id = Column(String, primary_key=True, index=True, comment="股票代號")
+    name = Column(String, comment="股票名稱")
+    close_price = Column(Float, comment="收盤價")
+    last_date = Column(DateTime, comment="最新資料日期")
+
+    # 籌碼維度
+    chip_raw_score = Column(Integer, default=0, comment="籌碼原始分數 (-25~+89)")
+    chip_normalized = Column(Integer, default=0, comment="籌碼標準化分數 (0-100)")
+    chip_signals_json = Column(String, comment="籌碼訊號 JSON")
+    expected_return = Column(Float, default=0.0, comment="預期報酬率 (%)")
+    win_rate = Column(Float, default=0.0, comment="歷史勝率 (%)")
+
+    # 技術維度
+    tech_raw_score = Column(Integer, default=0, comment="技術原始分數 (-120~+164)")
+    tech_normalized = Column(Integer, default=0, comment="技術標準化分數 (0-100)")
+    tech_signals_json = Column(String, comment="技術訊號 JSON")
+
+    # 基本面維度
+    fund_raw_score = Column(Integer, default=0, comment="基本面原始分數 (-73~+93)")
+    fund_normalized = Column(Integer, default=0, comment="基本面標準化分數 (0-100)")
+    fund_signals_json = Column(String, comment="基本面訊號 JSON")
+
+    # 聚合
+    signal_count = Column(Integer, default=0, comment="訊號總數")
+    risk_level = Column(String, default="中", comment="風險等級")
+
+    # 警示 & 可轉債
+    alert_status_json = Column(String, comment="警示狀態 JSON")
+    cb_arbitrage_score = Column(Integer, comment="可轉債套利評分")
+    cb_signals_json = Column(String, comment="可轉債訊號 JSON")
+
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_slc_chip", "chip_normalized"),
+        Index("idx_slc_tech", "tech_normalized"),
+        Index("idx_slc_fund", "fund_normalized"),
+    )
+
+
 class DatabaseManager:
     """PostgreSQL 資料庫管理器"""
 
@@ -490,9 +539,16 @@ class DatabaseManager:
         print(f"Database initialized: {database_url.split('@')[0]}@***")
 
     async def init_database(self):
-        """初始化資料庫表格"""
-        async with self.async_engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        """初始化資料庫表格（處理多實例同時啟動的競態條件）"""
+        from sqlalchemy.exc import IntegrityError, OperationalError
+
+        try:
+            async with self.async_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        except (IntegrityError, OperationalError):
+            # 多個 Cloud Run 實例同時啟動時，create_all 可能因
+            # pg_type_typname_nsp_index 重複而失敗，忽略即可
+            pass
 
     @asynccontextmanager
     async def get_session(self):
@@ -2118,6 +2174,59 @@ class DatabaseManager:
                     signals,
                 )
 
+    async def save_stock_list_cache(self, records: list[dict]):
+        """批次儲存股票列表快取（UPSERT）"""
+        if not records:
+            return
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                # 分批處理避免單次 SQL 過大
+                batch_size = 500
+                for i in range(0, len(records), batch_size):
+                    batch = records[i : i + batch_size]
+                    await session.execute(
+                        text("""
+                            INSERT INTO stock_list_cache
+                            (stock_id, name, close_price, last_date,
+                             chip_raw_score, chip_normalized, chip_signals_json,
+                             expected_return, win_rate,
+                             tech_raw_score, tech_normalized, tech_signals_json,
+                             fund_raw_score, fund_normalized, fund_signals_json,
+                             signal_count, risk_level,
+                             alert_status_json, cb_arbitrage_score, cb_signals_json, updated_at)
+                            VALUES
+                            (:stock_id, :name, :close_price, :last_date,
+                             :chip_raw_score, :chip_normalized, :chip_signals_json,
+                             :expected_return, :win_rate,
+                             :tech_raw_score, :tech_normalized, :tech_signals_json,
+                             :fund_raw_score, :fund_normalized, :fund_signals_json,
+                             :signal_count, :risk_level,
+                             :alert_status_json, :cb_arbitrage_score, :cb_signals_json, :updated_at)
+                            ON CONFLICT (stock_id) DO UPDATE SET
+                                name = EXCLUDED.name,
+                                close_price = EXCLUDED.close_price,
+                                last_date = EXCLUDED.last_date,
+                                chip_raw_score = EXCLUDED.chip_raw_score,
+                                chip_normalized = EXCLUDED.chip_normalized,
+                                chip_signals_json = EXCLUDED.chip_signals_json,
+                                expected_return = EXCLUDED.expected_return,
+                                win_rate = EXCLUDED.win_rate,
+                                tech_raw_score = EXCLUDED.tech_raw_score,
+                                tech_normalized = EXCLUDED.tech_normalized,
+                                tech_signals_json = EXCLUDED.tech_signals_json,
+                                fund_raw_score = EXCLUDED.fund_raw_score,
+                                fund_normalized = EXCLUDED.fund_normalized,
+                                fund_signals_json = EXCLUDED.fund_signals_json,
+                                signal_count = EXCLUDED.signal_count,
+                                risk_level = EXCLUDED.risk_level,
+                                alert_status_json = EXCLUDED.alert_status_json,
+                                cb_arbitrage_score = EXCLUDED.cb_arbitrage_score,
+                                cb_signals_json = EXCLUDED.cb_signals_json,
+                                updated_at = EXCLUDED.updated_at
+                        """),
+                        batch,
+                    )
+
     async def bulk_load_convertible_bond_daily(
         self, bond_ids: list[str], days: int = 250
     ) -> dict[str, pd.DataFrame]:
@@ -2192,18 +2301,22 @@ class DatabaseManager:
             )
             return [dict(row._mapping) for row in result.fetchall()]
 
-    async def get_cb_signals_by_underlying(self) -> dict[str, int]:
-        """取得 underlying_stock_id → max(normalized_score) 映射"""
+    async def get_cb_signals_by_underlying(self) -> dict[str, dict]:
+        """取得 underlying_stock_id → {score, signals_json} 映射（取最高分的 CB）"""
         async with self.get_session() as session:
             result = await session.execute(
                 text("""
-                    SELECT underlying_stock_id, MAX(normalized_score) as cb_arbitrage_score
+                    SELECT DISTINCT ON (underlying_stock_id)
+                        underlying_stock_id, normalized_score as cb_arbitrage_score, signals_json
                     FROM convertible_bond_signals
-                    GROUP BY underlying_stock_id
+                    ORDER BY underlying_stock_id, normalized_score DESC
                 """)
             )
             return {
-                row._mapping["underlying_stock_id"]: row._mapping["cb_arbitrage_score"]
+                row._mapping["underlying_stock_id"]: {
+                    "score": row._mapping["cb_arbitrage_score"],
+                    "signals_json": row._mapping["signals_json"],
+                }
                 for row in result.fetchall()
             }
 

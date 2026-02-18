@@ -31,6 +31,9 @@ async def update_convertible_bonds(db_manager):
     print("=" * 60)
 
     # Step 1: 取得 CB 清單
+    # ⚠️ TPEX OpenAPI 只有發行時轉換價 (Conversion/ExchangePriceAtIssuance)，
+    #    不是最新調整後轉換價。CB 經除權息調整後的轉換價需要 MOPS 等額外來源。
+    #    目前影響：轉換價值/溢價率計算可能偏差（分母偏大）
     bonds = await cb_fetcher.get_convertible_bond_list()
     if not bonds:
         print("⚠️  無可轉債資料")
@@ -70,6 +73,23 @@ async def update_convertible_bonds(db_manager):
                     stock_daily_map[sid] = {}
                 stock_daily_map[sid][d] = float(r["close"])
 
+    # Step 2b: 用 TWSE/TPEX Open Data 補齊缺失的標的股收盤價
+    missing_ids = [sid for sid in underlying_ids if sid not in stock_daily_map]
+    if missing_ids:
+        print(f"📡 {len(missing_ids)} 檔標的股不在 stock_daily，從交易所取得收盤價...")
+        all_close = await cb_fetcher.fetch_all_stock_close_prices()
+        supplemented = 0
+        for sid in missing_ids:
+            if sid in all_close:
+                # 只有最新一天的資料，用 "latest" 作為 key
+                stock_daily_map[sid] = {"latest": all_close[sid]}
+                supplemented += 1
+        if supplemented:
+            print(f"✅ 補齊 {supplemented}/{len(missing_ids)} 檔標的股收盤價")
+        still_missing = len(missing_ids) - supplemented
+        if still_missing:
+            print(f"⚠️  仍有 {still_missing} 檔標的股無收盤價")
+
     # Step 3: 取得每日交易資料
     print(f"📡 更新 {len(bonds)} 檔可轉債每日資料...")
     all_daily = await cb_fetcher.fetch_all_cb_daily(bonds, stock_daily_map)
@@ -106,7 +126,7 @@ async def update_convertible_bonds(db_manager):
     for bond_id, daily in latest_daily.items():
         bond_info = bond_map.get(bond_id, {})
         underlying_id = bond_info.get("underlying_stock_id", "")
-        underlying_strength = strength_map.get(underlying_id, 50)
+        underlying_strength = strength_map.get(underlying_id)
 
         result = ConvertibleSignalService.calculate_signals(
             cb_close=daily.get("close") or 0,

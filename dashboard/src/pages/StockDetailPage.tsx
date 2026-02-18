@@ -446,9 +446,11 @@ export default function StockDetailPage() {
       )}
 
       {/* 技術分析卡 */}
-      {detail.technical_signals && detail.technical_signals.length > 0 && (
+      {((detail.technical_signals && detail.technical_signals.length > 0) ||
+        (detail.recent_events && detail.recent_events.length > 0)) && (
         <TechnicalCard
-          technical_signals={detail.technical_signals}
+          technical_signals={detail.technical_signals || []}
+          recent_events={detail.recent_events || []}
           technical_strength={detail.signal_strength}
           className="mt-6"
         />

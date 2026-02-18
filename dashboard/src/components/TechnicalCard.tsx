@@ -3,13 +3,14 @@ import type { ChipSignal } from '../types/stock'
 
 interface Props {
   technical_signals: ChipSignal[]
+  recent_events?: ChipSignal[]
   technical_strength: number
   className?: string
 }
 
-type TabType = 'all' | 'ma' | 'momentum' | 'pattern' | 'trend' | 'other'
+type TabType = 'all' | 'ma' | 'momentum' | 'pattern' | 'trend' | 'events' | 'other'
 
-export function TechnicalCard({ technical_signals, technical_strength, className = '' }: Props) {
+export function TechnicalCard({ technical_signals, recent_events = [], technical_strength, className = '' }: Props) {
   const [activeTab, setActiveTab] = useState<TabType>('all')
 
   // 訊號分類
@@ -20,6 +21,7 @@ export function TechnicalCard({ technical_signals, technical_strength, className
       momentum: [],
       pattern: [],
       trend: [],
+      events: recent_events,
       other: []
     }
 
@@ -67,6 +69,7 @@ export function TechnicalCard({ technical_signals, technical_strength, className
     { id: 'momentum' as TabType, label: '動量訊號', count: categories.momentum.length },
     { id: 'pattern' as TabType, label: '形態訊號', count: categories.pattern.length },
     { id: 'trend' as TabType, label: '趨勢訊號', count: categories.trend.length },
+    { id: 'events' as TabType, label: '近期事件', count: categories.events.length },
     { id: 'other' as TabType, label: '其他訊號', count: categories.other.length },
   ]
 
@@ -86,6 +89,14 @@ export function TechnicalCard({ technical_signals, technical_strength, className
       return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
     }
     return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+  }
+
+  // 事件訊號使用不同樣式
+  const getEventColorClass = (score: number) => {
+    if (score > 0) {
+      return 'bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700'
+    }
+    return 'bg-purple-50 text-purple-800 border border-purple-300 dark:bg-purple-900/30 dark:text-purple-200 dark:border-purple-700'
   }
 
   return (
@@ -118,7 +129,11 @@ export function TechnicalCard({ technical_signals, technical_strength, className
             >
               {tab.label}
               {tab.count > 0 && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                  tab.id === 'events'
+                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+                    : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                }`}>
                   {tab.count}
                 </span>
               )}
@@ -129,10 +144,17 @@ export function TechnicalCard({ technical_signals, technical_strength, className
 
       {/* Tab 內容區域 */}
       <div className="p-6">
-        <SignalsList
-          signals={categories[activeTab]}
-          getSignalColorClass={getSignalColorClass}
-        />
+        {activeTab === 'events' ? (
+          <SignalsList
+            signals={categories.events}
+            getSignalColorClass={getEventColorClass}
+          />
+        ) : (
+          <SignalsList
+            signals={categories[activeTab]}
+            getSignalColorClass={getSignalColorClass}
+          />
+        )}
       </div>
     </div>
   )

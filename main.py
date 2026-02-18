@@ -65,6 +65,16 @@ async def main():
     except Exception as e:
         print(f"❌ 可轉債分析失敗（不影響主流程）: {e}")
 
+    # 步驟 4.5: 更新股票列表快取（消除 API OOM）
+    print("\n📦 更新股票列表快取...")
+    try:
+        from twstock.stock_list_cache_updater import StockListCacheUpdater
+        cache_updater = StockListCacheUpdater(db_manager)
+        cache_result = await cache_updater.update_cache()
+        print(f"✅ 快取: {cache_result['count']} 支股票，耗時 {cache_result['elapsed']:.1f}s")
+    except Exception as e:
+        print(f"❌ 快取更新失敗（不影響主流程）: {e}")
+
     # 步驟 5: 自動清理舊資料（僅 production）
     try:
         environment = os.getenv("ENVIRONMENT", "development")

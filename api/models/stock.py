@@ -52,10 +52,10 @@ class StockListItem(BaseModel):
     alert_status: Optional[AlertStatus] = Field(None, description="警示狀態")
 
     # 三種強度（籌碼 + 技術 + 基本面）
-    chip_strength: int = Field(..., ge=-25, le=89, description="籌碼強度（原始分數）")
-    technical_strength: int = Field(..., ge=-170, le=194, description="技術強度（原始分數）")
-    fundamental_strength: int = Field(..., ge=-73, le=93, description="基本面強度（原始分數）")
-    overall_strength: int = Field(..., ge=0, le=100, description="綜合強度 (0-100)")
+    chip_strength: int = Field(..., description="籌碼強度（原始分數）")
+    technical_strength: int = Field(..., description="技術強度（原始分數）")
+    fundamental_strength: int = Field(..., description="基本面強度（原始分數）")
+    overall_strength: int = Field(..., description="綜合強度 (0-100)")
 
     # 權重資訊
     weights: Dict[str, float] = Field(
@@ -74,6 +74,9 @@ class StockListItem(BaseModel):
     fundamental_signals: List[ChipSignal] = Field(
         default_factory=list, description="基本面訊號"
     )
+    recent_events: List[ChipSignal] = Field(
+        default_factory=list, description="近期事件（漲跌停等極端事件）"
+    )
 
     # 向後相容（棄用但保留）
     signal_strength: int = Field(..., description="已棄用，請使用 overall_strength")
@@ -84,9 +87,12 @@ class StockListItem(BaseModel):
         default_factory=list, description="主要訊號列表（向後相容）"
     )
 
-    # 可轉債套利分數
+    # 可轉債套利
     cb_arbitrage_score: Optional[int] = Field(
         None, description="可轉債套利評分 (0-100)，無 CB 為 null"
+    )
+    cb_signals: List[ChipSignal] = Field(
+        default_factory=list, description="可轉債套利訊號"
     )
 
     last_updated: datetime = Field(..., description="最後更新時間")
@@ -291,13 +297,16 @@ class StockDetail(BaseModel):
     basic_info: BasicInfo
     price_info: PriceInfo
 
-    # 警示狀態（新增）
+    # 警示狀態
     alert_status: Optional[AlertStatus] = Field(None, description="警示狀態")
 
-    # 訊號列表（更新：新增基本面資訊）
+    # 訊號列表
     chip_signals: List[ChipSignal] = Field(default_factory=list, description="籌碼訊號")
     technical_signals: List[ChipSignal] = Field(
         default_factory=list, description="技術訊號"
+    )
+    recent_events: List[ChipSignal] = Field(
+        default_factory=list, description="近期事件（漲跌停等極端事件）"
     )
     fundamental_info: Optional[FundamentalInfo] = Field(None, description="基本面資訊")
 

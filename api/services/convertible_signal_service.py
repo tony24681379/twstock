@@ -83,7 +83,7 @@ class ConvertibleSignalService:
         maturity_date: Optional[datetime],
         put_date: Optional[datetime],
         put_price: Optional[float],
-        underlying_strength: int = 50,
+        underlying_strength: Optional[int] = None,
         today: Optional[datetime] = None,
     ) -> dict:
         """
@@ -110,7 +110,7 @@ class ConvertibleSignalService:
                 raw_score += SIGNALS["discount_arbitrage"]["score"]
 
         # 2. 低溢價率 (+15)
-        if premium_rate is not None and premium_rate < 5 and underlying_strength > 50:
+        if premium_rate is not None and premium_rate < 5 and underlying_strength is not None and underlying_strength > 50:
             triggered.append(_make_signal(
                 "low_premium",
                 f"溢價率 {premium_rate:.1f}%，標的股強度 {underlying_strength}"
@@ -158,7 +158,7 @@ class ConvertibleSignalService:
             raw_score += SIGNALS["below_par"]["score"]
 
         # 7. 標的股強勢 (+12)
-        if underlying_strength > 70:
+        if underlying_strength is not None and underlying_strength > 70:
             triggered.append(_make_signal(
                 "strong_underlying",
                 f"標的股強度 {underlying_strength}"
@@ -166,7 +166,7 @@ class ConvertibleSignalService:
             raw_score += SIGNALS["strong_underlying"]["score"]
 
         # 8. 標的股弱勢 (-15)
-        if underlying_strength < 30:
+        if underlying_strength is not None and underlying_strength < 30:
             triggered.append(_make_signal(
                 "weak_underlying",
                 f"標的股強度 {underlying_strength}"

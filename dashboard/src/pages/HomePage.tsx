@@ -336,17 +336,26 @@ export default function HomePage() {
                   </td>
 
                   {/* CB 套利分數 */}
-                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                  <td className="px-6 py-4 whitespace-nowrap text-center relative group">
                     {stock.cb_arbitrage_score != null ? (
-                      <Link
-                        to={`/convertible?sortBy=normalized_score&order=desc`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="hover:opacity-80"
-                      >
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${getSignalStrengthBadgeClass(stock.cb_arbitrage_score)}`}>
-                          {stock.cb_arbitrage_score}
-                        </span>
-                      </Link>
+                      <>
+                        <Link
+                          to={`/convertible?sortBy=normalized_score&order=desc`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:opacity-80"
+                        >
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${getSignalStrengthBadgeClass(stock.cb_arbitrage_score)}`}>
+                            {stock.cb_arbitrage_score}
+                          </span>
+                        </Link>
+                        {stock.cb_signals && stock.cb_signals.length > 0 && (
+                          <SignalTooltip
+                            title={`CB 套利訊號 (${stock.cb_signals.length})`}
+                            signals={stock.cb_signals}
+                            show={true}
+                          />
+                        )}
+                      </>
                     ) : (
                       <span className="text-xs text-gray-400 dark:text-gray-600">-</span>
                     )}

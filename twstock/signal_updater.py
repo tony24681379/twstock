@@ -25,6 +25,7 @@ try:
         SIGNAL_TYPE_CROSSOVER,
         SIGNAL_TYPE_STATE,
         CROSSOVER_DISPLAY_DAYS,
+        EXTREME_EVENT_SIGNALS,
     )
 except ImportError:
     from database import DatabaseManager, StockSignalHistory, StockTechnicalSignals
@@ -34,6 +35,7 @@ except ImportError:
         SIGNAL_TYPE_CROSSOVER,
         SIGNAL_TYPE_STATE,
         CROSSOVER_DISPLAY_DAYS,
+        EXTREME_EVENT_SIGNALS,
     )
 
 
@@ -544,7 +546,13 @@ class SignalUpdater:
         Args:
             stock_ids: 需要更新的股票列表
         """
-        today = datetime.now().date()
+        # 使用最新交易日作為基準（而非 datetime.now()），確保不同天執行結果一致
+        async with self.db.get_session() as session:
+            result = await session.execute(
+                text("SELECT MAX(date)::date FROM stock_daily")
+            )
+            latest_trading_date = result.scalar()
+        today = latest_trading_date or datetime.now().date()
         cutoff_date_crossover = today - timedelta(days=CROSSOVER_DISPLAY_DAYS)
 
         async with self.db.get_session() as session:
@@ -586,8 +594,8 @@ class SignalUpdater:
                 buy_signals = sum(1 for s in valid_signals if s.score > 0)
                 sell_signals = sum(1 for s in valid_signals if s.score < 0)
 
-                # 標準化分數（-120 ~ +164 → 0 ~ 100）
-                normalized_score = int(((raw_score + 120) / 284) * 100)
+                # 標準化分數（-172 ~ +174 → 0 ~ 100）
+                normalized_score = int(((raw_score + 172) / 346) * 100)
 
                 # 建立 signals_detail JSON
                 signals_detail = []
@@ -603,6 +611,7 @@ class SignalUpdater:
                             "trigger_date": s.trigger_date.isoformat(),
                             "days_since_trigger": days_since,
                             "is_valid": True,
+                            "is_event": s.signal_name in EXTREME_EVENT_SIGNALS,
                         }
                     )
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { fetchConvertibleBondDetail, fetchConvertibleBondHistory } from '../lib/api'
 import type { ConvertibleBondDetail, ConvertibleBondHistoryPoint } from '../types/stock'
+import CBHistoryChart from '../components/CBHistoryChart'
 
 function getScoreBadgeClass(score: number): string {
   if (score >= 80) return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
@@ -178,54 +179,13 @@ export default function ConvertibleDetailPage() {
         </div>
       </div>
 
-      {/* 歷史趨勢表格 */}
+      {/* 歷史趨勢圖表 */}
       {history.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 border-b border-gray-200 dark:border-gray-700 pb-2">
             歷史趨勢（最近 {history.length} 天）
           </h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-              <thead>
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs text-gray-500 dark:text-gray-400">日期</th>
-                  <th className="px-3 py-2 text-right text-xs text-gray-500 dark:text-gray-400">CB 收盤</th>
-                  <th className="px-3 py-2 text-right text-xs text-gray-500 dark:text-gray-400">標的股</th>
-                  <th className="px-3 py-2 text-right text-xs text-gray-500 dark:text-gray-400">轉換價值</th>
-                  <th className="px-3 py-2 text-right text-xs text-gray-500 dark:text-gray-400">溢價率</th>
-                  <th className="px-3 py-2 text-right text-xs text-gray-500 dark:text-gray-400">成交量</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                {history.slice(-30).reverse().map((pt, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-3 py-1.5 text-gray-600 dark:text-gray-400">
-                      {new Date(pt.date).toLocaleDateString('zh-TW')}
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-gray-900 dark:text-gray-100">
-                      {pt.close != null ? pt.close.toFixed(2) : '-'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-gray-900 dark:text-gray-100">
-                      {pt.underlying_close != null ? pt.underlying_close.toFixed(2) : '-'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-gray-900 dark:text-gray-100">
-                      {pt.conversion_value != null ? pt.conversion_value.toFixed(2) : '-'}
-                    </td>
-                    <td className={`px-3 py-1.5 text-right ${
-                      pt.premium_rate != null && pt.premium_rate < 0
-                        ? 'text-green-600 dark:text-green-400'
-                        : 'text-gray-600 dark:text-gray-400'
-                    }`}>
-                      {pt.premium_rate != null ? `${pt.premium_rate.toFixed(2)}%` : '-'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-gray-900 dark:text-gray-100">
-                      {pt.volume != null ? Math.round(pt.volume).toLocaleString() : '-'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CBHistoryChart history={history} />
         </div>
       )}
     </div>

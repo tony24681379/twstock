@@ -55,17 +55,17 @@ class SignalScore:
     NEW_HIGH_60 = 12
     NEW_LOW_60 = -12
 
-    # 極端漲跌訊號（基本）
-    LIMIT_DOWN = -30      # 跌停板
-    LIMIT_UP = 30         # 漲停板
-    BIG_DROP = -20        # 大跌
-    BIG_RISE = 20         # 大漲
+    # 極端漲跌訊號（基本）— 降低權重，避免單一事件主導分數
+    LIMIT_DOWN = -10      # 跌停板（原 -30）
+    LIMIT_UP = 10         # 漲停板（原 +30）
+    BIG_DROP = -5         # 大跌（原 -20）
+    BIG_RISE = 5          # 大漲（原 +20）
 
-    # 極端漲跌訊號（進階）
-    OPEN_LIMIT_DOWN = -35  # 開盤跌停
-    CONSECUTIVE_LIMIT_DOWN = -50  # 連續跌停
-    LIMIT_DOWN_HEAVY_VOLUME = -40  # 跌停爆量
-    LIMIT_DOWN_BREAK = 10  # 跌停開板
+    # 極端漲跌訊號（進階）— 降低權重
+    OPEN_LIMIT_DOWN = -12  # 開盤跌停（原 -35）
+    CONSECUTIVE_LIMIT_DOWN = -20  # 連續跌停（原 -50）
+    LIMIT_DOWN_HEAVY_VOLUME = -15  # 跌停爆量（原 -40）
+    LIMIT_DOWN_BREAK = 5   # 跌停開板（原 +10）
 
 
 # ============================================================================
@@ -114,6 +114,12 @@ SIGNAL_TYPE_MAP = {
     "空頭排列": SIGNAL_TYPE_STATE,  # MA5 < MA10 < MA20
     "創60日新高": SIGNAL_TYPE_STATE,  # 收盤價 >= 60日最高
     "創60日新低": SIGNAL_TYPE_STATE,  # 收盤價 <= 60日最低
+}
+
+# 極端事件訊號集合（UI 分離展示用）
+EXTREME_EVENT_SIGNALS = {
+    "漲停板", "跌停板", "大漲訊號", "大跌警示",
+    "開盤跌停", "連續跌停", "跌停爆量", "跌停開板",
 }
 
 
@@ -637,10 +643,11 @@ class VectorizedSignalDetector:
             .reset_index()
         )
 
-        # 正規化到 0-100（理論範圍 -170 到 +194）
-        # 新增極端漲跌訊號後，最低可達 -170（連續跌停+其他負分），最高可達 +194（漲停+其他正分）
-        min_score = -170
-        max_score = 194
+        # 正規化到 0-100（理論範圍 -172 到 +174）
+        # crossover(-52) + state(-68) + extreme(-52) = -172
+        # crossover(+74) + state(+80) + extreme(+20) = +174
+        min_score = -172
+        max_score = 174
 
         strength["normalized_score"] = (
             (((strength["raw_score"] - min_score) / (max_score - min_score)) * 100)
@@ -721,13 +728,249 @@ class VectorizedSignalDetector:
     # ============================================================================
 
     @staticmethod
+    def _detect_signals_for_day_pair(
+        latest: pd.DataFrame,
+        prev: pd.DataFrame,
+        prev2: pd.DataFrame = None,
+    ) -> list:
+        """檢測單一 day-pair 的 18 個交叉/事件型訊號
+
+        Args:
+            latest: 當天資料 DataFrame（含 stock_id, date, close, open, high, low, volume, _volume_ma20, ...）
+            prev: 前一天資料 DataFrame
+            prev2: 前前一天資料（連續跌停用），可為 None
+
+        Returns:
+            list of DataFrames，每個是一種訊號的觸發結果
+        """
+        signals = []
+
+        # 漲跌幅
+        pct_change = (latest["close"] - prev["close"]) / prev["close"] * 100
+
+        # ========== 10 個交叉/事件型訊號 ==========
+
+        # 1. 黃金交叉
+        golden_cross = (latest["ma5"] > latest["ma20"]) & (prev["ma5"] <= prev["ma20"])
+        if golden_cross.any():
+            signals.append(
+                latest[golden_cross][["stock_id", "date"]].assign(
+                    signal_name="黃金交叉", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.GOLDEN_CROSS, trigger_date=latest[golden_cross]["date"],
+                )
+            )
+
+        # 2. 死亡交叉
+        death_cross = (latest["ma5"] < latest["ma20"]) & (prev["ma5"] >= prev["ma20"])
+        if death_cross.any():
+            signals.append(
+                latest[death_cross][["stock_id", "date"]].assign(
+                    signal_name="死亡交叉", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.DEATH_CROSS, trigger_date=latest[death_cross]["date"],
+                )
+            )
+
+        # 3-4. 站上/跌破季線
+        has_ma60 = "ma60" in latest.columns and latest["ma60"].notna().any()
+        if has_ma60:
+            above_ma60 = (latest["close"] > latest["ma60"]) & (prev["close"] <= prev["ma60"])
+            if above_ma60.any():
+                signals.append(
+                    latest[above_ma60][["stock_id", "date"]].assign(
+                        signal_name="站上季線", signal_type=SIGNAL_TYPE_CROSSOVER,
+                        score=SignalScore.ABOVE_MA60, trigger_date=latest[above_ma60]["date"],
+                    )
+                )
+            below_ma60 = (latest["close"] < latest["ma60"]) & (prev["close"] >= prev["ma60"])
+            if below_ma60.any():
+                signals.append(
+                    latest[below_ma60][["stock_id", "date"]].assign(
+                        signal_name="跌破季線", signal_type=SIGNAL_TYPE_CROSSOVER,
+                        score=SignalScore.BELOW_MA60, trigger_date=latest[below_ma60]["date"],
+                    )
+                )
+
+        # 5. KD向上
+        kd_up = (
+            (latest["k9"] > latest["d9"]) & (prev["k9"] <= prev["d9"])
+            & (latest["k9"] < 20) & (latest["d9"] < 20)
+        )
+        if kd_up.any():
+            signals.append(
+                latest[kd_up][["stock_id", "date"]].assign(
+                    signal_name="KD向上", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.KD_UP, trigger_date=latest[kd_up]["date"],
+                )
+            )
+
+        # 6. 布林突破
+        bollinger_break = latest["close"] > latest["bollinger_upper"]
+        if bollinger_break.any():
+            signals.append(
+                latest[bollinger_break][["stock_id", "date"]].assign(
+                    signal_name="布林突破", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.BOLLINGER_BREAKOUT, trigger_date=latest[bollinger_break]["date"],
+                )
+            )
+
+        # 7. 長紅吞噬
+        long_red_engulf = (
+            (pct_change > 3) & (latest["close"] > latest["open"])
+            & (latest["open"] < prev["close"]) & (latest["close"] > prev["open"])
+        )
+        if long_red_engulf.any():
+            signals.append(
+                latest[long_red_engulf][["stock_id", "date"]].assign(
+                    signal_name="長紅吞噬", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LONG_RED_ENGULF, trigger_date=latest[long_red_engulf]["date"],
+                )
+            )
+
+        # 8. 長黑吞噬
+        long_black_engulf = (
+            (pct_change < -3) & (latest["close"] < latest["open"])
+            & (latest["open"] > prev["close"]) & (latest["close"] < prev["open"])
+        )
+        if long_black_engulf.any():
+            signals.append(
+                latest[long_black_engulf][["stock_id", "date"]].assign(
+                    signal_name="長黑吞噬", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LONG_BLACK_ENGULF, trigger_date=latest[long_black_engulf]["date"],
+                )
+            )
+
+        # 9. 跳空向上
+        gap_up = (
+            (latest["low"] > prev["high"]) & (pct_change > 3)
+            & (latest["volume"] > prev["volume"] * 1.2)
+        )
+        if gap_up.any():
+            signals.append(
+                latest[gap_up][["stock_id", "date"]].assign(
+                    signal_name="跳空向上", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.GAP_UP, trigger_date=latest[gap_up]["date"],
+                )
+            )
+
+        # 10. 跳空向下
+        gap_down = (latest["high"] < prev["low"]) & (pct_change < -3)
+        if gap_down.any():
+            signals.append(
+                latest[gap_down][["stock_id", "date"]].assign(
+                    signal_name="跳空向下", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.GAP_DOWN, trigger_date=latest[gap_down]["date"],
+                )
+            )
+
+        # ========== 極端漲跌訊號（8 個）==========
+
+        # 11. 跌停板
+        limit_down = (latest["close"] == latest["low"]) & (pct_change <= -9.5)
+        if limit_down.any():
+            signals.append(
+                latest[limit_down][["stock_id", "date"]].assign(
+                    signal_name="跌停板", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_DOWN, trigger_date=latest[limit_down]["date"],
+                )
+            )
+
+        # 12. 漲停板
+        limit_up = (latest["close"] == latest["high"]) & (pct_change >= 9.5)
+        if limit_up.any():
+            signals.append(
+                latest[limit_up][["stock_id", "date"]].assign(
+                    signal_name="漲停板", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_UP, trigger_date=latest[limit_up]["date"],
+                )
+            )
+
+        # 13. 大跌警示
+        big_drop = (pct_change <= -7.0) & ~limit_down
+        if big_drop.any():
+            signals.append(
+                latest[big_drop][["stock_id", "date"]].assign(
+                    signal_name="大跌警示", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.BIG_DROP, trigger_date=latest[big_drop]["date"],
+                )
+            )
+
+        # 14. 大漲訊號
+        big_rise = (pct_change >= 7.0) & ~limit_up
+        if big_rise.any():
+            signals.append(
+                latest[big_rise][["stock_id", "date"]].assign(
+                    signal_name="大漲訊號", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.BIG_RISE, trigger_date=latest[big_rise]["date"],
+                )
+            )
+
+        # 15. 開盤跌停
+        limit_down_price = prev["close"] * 0.9
+        open_limit_down = (
+            (abs(latest["open"] - limit_down_price) / limit_down_price < 0.005)
+            & limit_down
+        )
+        if open_limit_down.any():
+            signals.append(
+                latest[open_limit_down][["stock_id", "date"]].assign(
+                    signal_name="開盤跌停", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.OPEN_LIMIT_DOWN, trigger_date=latest[open_limit_down]["date"],
+                )
+            )
+
+        # 16. 連續跌停（需要 prev2）
+        if prev2 is not None and not prev2.empty:
+            prev_pct_change = (prev["close"] - prev2["close"]) / prev2["close"] * 100
+            prev_limit_down = (prev["close"] == prev["low"]) & (prev_pct_change <= -9.5)
+            consecutive_limit_down = limit_down & prev_limit_down
+            if consecutive_limit_down.any():
+                signals.append(
+                    latest[consecutive_limit_down][["stock_id", "date"]].assign(
+                        signal_name="連續跌停", signal_type=SIGNAL_TYPE_CROSSOVER,
+                        score=SignalScore.CONSECUTIVE_LIMIT_DOWN,
+                        trigger_date=latest[consecutive_limit_down]["date"],
+                    )
+                )
+
+        # 17. 跌停爆量（需要 _volume_ma20 欄位已在 latest 中）
+        has_vma20 = "_volume_ma20" in latest.columns and latest["_volume_ma20"].notna().any()
+        if has_vma20:
+            limit_down_heavy_volume = limit_down & (
+                latest["volume"] > latest["_volume_ma20"] * 2
+            )
+            if limit_down_heavy_volume.any():
+                signals.append(
+                    latest[limit_down_heavy_volume][["stock_id", "date"]].assign(
+                        signal_name="跌停爆量", signal_type=SIGNAL_TYPE_CROSSOVER,
+                        score=SignalScore.LIMIT_DOWN_HEAVY_VOLUME,
+                        trigger_date=latest[limit_down_heavy_volume]["date"],
+                    )
+                )
+
+        # 18. 跌停開板
+        limit_down_break = (
+            (abs(latest["low"] - limit_down_price) / limit_down_price < 0.005)
+            & (latest["close"] > limit_down_price * 1.01)
+            & ~limit_down
+        )
+        if limit_down_break.any():
+            signals.append(
+                latest[limit_down_break][["stock_id", "date"]].assign(
+                    signal_name="跌停開板", signal_type=SIGNAL_TYPE_CROSSOVER,
+                    score=SignalScore.LIMIT_DOWN_BREAK, trigger_date=latest[limit_down_break]["date"],
+                )
+            )
+
+        return signals
+
+    @staticmethod
     def detect_crossover_signals(
         df: pd.DataFrame, history_df: pd.DataFrame = None
     ) -> pd.DataFrame:
-        """檢測交叉/事件型訊號（crossover signals）
+        """檢測交叉/事件型訊號（crossover signals）— 多日迭代版
 
-        交叉訊號是一次性事件（如黃金交叉、KD向上），觸發後顯示5天。
-        此方法檢測新觸發的交叉訊號，並過濾掉5天內已觸發的重複訊號。
+        掃描最近 5 對 day-pair（而非只看最新一天），確保即使 signal_updater
+        不是每天跑也不會漏偵測訊號。
 
         Args:
             df: 完整的日線資料（包含歷史）
@@ -740,320 +983,74 @@ class VectorizedSignalDetector:
         Returns:
             新觸發的交叉訊號 DataFrame
             Columns: [stock_id, signal_name, signal_type, score, trigger_date, date]
-
-        Example:
-            >>> # 檢測所有新的交叉訊號
-            >>> new_crossovers = VectorizedSignalDetector.detect_crossover_signals(df)
-            >>> print(f"新觸發 {len(new_crossovers)} 個交叉訊號")
-            >>>
-            >>> # 帶去重檢測
-            >>> history = pd.DataFrame(...)  # 從資料庫載入
-            >>> new_crossovers = VectorizedSignalDetector.detect_crossover_signals(df, history)
         """
-        # 過濾掉資料不足的股票（至少需要 2 筆資料）
+        # 至少需要 3 筆資料（latest + prev + prev2 for 連續跌停）
         stock_counts = df.groupby("stock_id").size()
-        valid_stocks = stock_counts[stock_counts >= 2].index
-        df_valid = df[df["stock_id"].isin(valid_stocks)]
+        valid_stocks = stock_counts[stock_counts >= 3].index
+        df_valid = df[df["stock_id"].isin(valid_stocks)].copy()
 
-        # 取得最新和前一筆資料
-        latest = df_valid.groupby("stock_id").last().reset_index()
-        prev = df_valid.groupby("stock_id").nth(-2).reset_index()
-
-        new_signals = []
-
-        # ========== 10 個交叉/事件型訊號 ==========
-
-        # 1. 黃金交叉（MA5 向上穿越 MA20）
-        golden_cross = (latest["ma5"] > latest["ma20"]) & (
-            prev["ma5"] <= prev["ma20"]
-        )
-        if golden_cross.any():
-            new_signals.append(
-                latest[golden_cross][["stock_id", "date"]].assign(
-                    signal_name="黃金交叉",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.GOLDEN_CROSS,
-                    trigger_date=latest[golden_cross]["date"],
-                )
-            )
-
-        # 2. 死亡交叉（MA5 向下跌破 MA20）
-        death_cross = (latest["ma5"] < latest["ma20"]) & (
-            prev["ma5"] >= prev["ma20"]
-        )
-        if death_cross.any():
-            new_signals.append(
-                latest[death_cross][["stock_id", "date"]].assign(
-                    signal_name="死亡交叉",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.DEATH_CROSS,
-                    trigger_date=latest[death_cross]["date"],
-                )
-            )
-
-        # 3. 站上季線（收盤價向上穿越 MA60）— 需要 ma60
-        has_ma60 = "ma60" in latest.columns and latest["ma60"].notna().any()
-        if has_ma60:
-            above_ma60 = (latest["close"] > latest["ma60"]) & (
-                prev["close"] <= prev["ma60"]
-            )
-            if above_ma60.any():
-                new_signals.append(
-                    latest[above_ma60][["stock_id", "date"]].assign(
-                        signal_name="站上季線",
-                        signal_type=SIGNAL_TYPE_CROSSOVER,
-                        score=SignalScore.ABOVE_MA60,
-                        trigger_date=latest[above_ma60]["date"],
-                    )
-                )
-
-            # 4. 跌破季線（收盤價向下跌破 MA60）
-            below_ma60 = (latest["close"] < latest["ma60"]) & (
-                prev["close"] >= prev["ma60"]
-            )
-            if below_ma60.any():
-                new_signals.append(
-                    latest[below_ma60][["stock_id", "date"]].assign(
-                        signal_name="跌破季線",
-                        signal_type=SIGNAL_TYPE_CROSSOVER,
-                        score=SignalScore.BELOW_MA60,
-                        trigger_date=latest[below_ma60]["date"],
-                    )
-                )
-
-        # 5. KD向上（K<20, D<20, K穿越D向上）
-        kd_up = (
-            (latest["k9"] > latest["d9"])
-            & (prev["k9"] <= prev["d9"])
-            & (latest["k9"] < 20)
-            & (latest["d9"] < 20)
-        )
-        if kd_up.any():
-            new_signals.append(
-                latest[kd_up][["stock_id", "date"]].assign(
-                    signal_name="KD向上",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.KD_UP,
-                    trigger_date=latest[kd_up]["date"],
-                )
-            )
-
-        # 6. 布林突破（價格突破布林上軌）
-        bollinger_break = latest["close"] > latest["bollinger_upper"]
-        if bollinger_break.any():
-            new_signals.append(
-                latest[bollinger_break][["stock_id", "date"]].assign(
-                    signal_name="布林突破",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.BOLLINGER_BREAKOUT,
-                    trigger_date=latest[bollinger_break]["date"],
-                )
-            )
-
-        # 7. 長紅吞噬（漲幅>3%, 紅K吞噬前K）
-        pct_change = (latest["close"] - prev["close"]) / prev["close"] * 100
-        long_red_engulf = (
-            (pct_change > 3)
-            & (latest["close"] > latest["open"])
-            & (latest["open"] < prev["close"])
-            & (latest["close"] > prev["open"])
-        )
-        if long_red_engulf.any():
-            new_signals.append(
-                latest[long_red_engulf][["stock_id", "date"]].assign(
-                    signal_name="長紅吞噬",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.LONG_RED_ENGULF,
-                    trigger_date=latest[long_red_engulf]["date"],
-                )
-            )
-
-        # 8. 長黑吞噬（跌幅<-3%, 黑K吞噬前K）
-        long_black_engulf = (
-            (pct_change < -3)
-            & (latest["close"] < latest["open"])
-            & (latest["open"] > prev["close"])
-            & (latest["close"] < prev["open"])
-        )
-        if long_black_engulf.any():
-            new_signals.append(
-                latest[long_black_engulf][["stock_id", "date"]].assign(
-                    signal_name="長黑吞噬",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.LONG_BLACK_ENGULF,
-                    trigger_date=latest[long_black_engulf]["date"],
-                )
-            )
-
-        # 9. 跳空向上（缺口+漲幅>3%+量增）
-        gap_up = (
-            (latest["low"] > prev["high"])
-            & (pct_change > 3)
-            & (latest["volume"] > prev["volume"] * 1.2)
-        )
-        if gap_up.any():
-            new_signals.append(
-                latest[gap_up][["stock_id", "date"]].assign(
-                    signal_name="跳空向上",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.GAP_UP,
-                    trigger_date=latest[gap_up]["date"],
-                )
-            )
-
-        # 10. 跳空向下（缺口+跌幅<-3%）
-        gap_down = (latest["high"] < prev["low"]) & (pct_change < -3)
-        if gap_down.any():
-            new_signals.append(
-                latest[gap_down][["stock_id", "date"]].assign(
-                    signal_name="跳空向下",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.GAP_DOWN,
-                    trigger_date=latest[gap_down]["date"],
-                )
-            )
-
-        # ========== 極端漲跌訊號（8 個）==========
-
-        # 11. 跌停板（收盤價 = 最低價 且 跌幅 <= -9.5%）
-        limit_down = (latest["close"] == latest["low"]) & (pct_change <= -9.5)
-        if limit_down.any():
-            new_signals.append(
-                latest[limit_down][["stock_id", "date"]].assign(
-                    signal_name="跌停板",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.LIMIT_DOWN,
-                    trigger_date=latest[limit_down]["date"],
-                )
-            )
-
-        # 12. 漲停板（收盤價 = 最高價 且 漲幅 >= +9.5%）
-        limit_up = (latest["close"] == latest["high"]) & (pct_change >= 9.5)
-        if limit_up.any():
-            new_signals.append(
-                latest[limit_up][["stock_id", "date"]].assign(
-                    signal_name="漲停板",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.LIMIT_UP,
-                    trigger_date=latest[limit_up]["date"],
-                )
-            )
-
-        # 13. 大跌警示（跌幅 <= -7%，但未跌停）
-        big_drop = (pct_change <= -7.0) & ~limit_down
-        if big_drop.any():
-            new_signals.append(
-                latest[big_drop][["stock_id", "date"]].assign(
-                    signal_name="大跌警示",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.BIG_DROP,
-                    trigger_date=latest[big_drop]["date"],
-                )
-            )
-
-        # 14. 大漲訊號（漲幅 >= +7%，但未漲停）
-        big_rise = (pct_change >= 7.0) & ~limit_up
-        if big_rise.any():
-            new_signals.append(
-                latest[big_rise][["stock_id", "date"]].assign(
-                    signal_name="大漲訊號",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.BIG_RISE,
-                    trigger_date=latest[big_rise]["date"],
-                )
-            )
-
-        # ========== 進階極端漲跌訊號（4 個）==========
-
-        # 15. 開盤跌停（開盤價 = 昨收 × 0.9 且維持跌停）
-        limit_down_price = prev["close"] * 0.9
-        open_limit_down = (
-            (abs(latest["open"] - limit_down_price) / limit_down_price < 0.005)
-            & limit_down
-        )
-        if open_limit_down.any():
-            new_signals.append(
-                latest[open_limit_down][["stock_id", "date"]].assign(
-                    signal_name="開盤跌停",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.OPEN_LIMIT_DOWN,
-                    trigger_date=latest[open_limit_down]["date"],
-                )
-            )
-
-        # 16. 連續跌停（今天跌停 且 昨天也跌停）
-        # 取得前前一日資料
-        prev2 = df.groupby("stock_id").nth(-3).reset_index()
-        prev_pct_change = (prev["close"] - prev2["close"]) / prev2["close"] * 100
-        prev_limit_down = (prev["close"] == prev["low"]) & (prev_pct_change <= -9.5)
-        consecutive_limit_down = limit_down & prev_limit_down
-        if consecutive_limit_down.any():
-            new_signals.append(
-                latest[consecutive_limit_down][["stock_id", "date"]].assign(
-                    signal_name="連續跌停",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.CONSECUTIVE_LIMIT_DOWN,
-                    trigger_date=latest[consecutive_limit_down]["date"],
-                )
-            )
-
-        # 17. 跌停爆量（跌停 + 成交量 > 20日均量 × 2）
-        # 計算 20 日平均量
-        volume_ma20 = df.groupby("stock_id")["volume"].transform(
+        # 預計算 20 日均量（全部股票一次算完）
+        volume_ma20 = df_valid.groupby("stock_id")["volume"].transform(
             lambda x: x.rolling(window=20, min_periods=1).mean()
         )
-        latest_volume_ma20 = (
-            df.groupby("stock_id")
-            .apply(lambda g: volume_ma20[g.index[-1]], include_groups=False)
-            .reset_index(name="volume_ma20")
-        )
-        latest = latest.merge(latest_volume_ma20, on="stock_id", how="left")
+        df_valid["_volume_ma20"] = volume_ma20
 
-        limit_down_heavy_volume = limit_down & (
-            latest["volume"] > latest["volume_ma20"] * 2
-        )
-        if limit_down_heavy_volume.any():
-            new_signals.append(
-                latest[limit_down_heavy_volume][["stock_id", "date"]].assign(
-                    signal_name="跌停爆量",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.LIMIT_DOWN_HEAVY_VOLUME,
-                    trigger_date=latest[limit_down_heavy_volume]["date"],
-                )
+        # 為每股的每一筆資料計算 rank（最新=0, 次新=1, ...）
+        df_valid["_rank"] = df_valid.groupby("stock_id").cumcount(ascending=False)
+
+        # 取最近 7 筆（rank 0~6），足以構成 5 對 day-pair + prev2
+        df_recent = df_valid[df_valid["_rank"] <= 6]
+
+        # 迭代 5 對 day-pair：(rank 0,1), (rank 1,2), ..., (rank 4,5)
+        all_signals = []
+        for i in range(5):
+            latest_rank = i
+            prev_rank = i + 1
+            prev2_rank = i + 2
+
+            latest = df_recent[df_recent["_rank"] == latest_rank].reset_index(drop=True)
+            prev = df_recent[df_recent["_rank"] == prev_rank].reset_index(drop=True)
+            prev2 = df_recent[df_recent["_rank"] == prev2_rank].reset_index(drop=True)
+
+            if latest.empty or prev.empty:
+                continue
+
+            # 確保 latest 和 prev 的 stock_id 對齊
+            common_stocks = set(latest["stock_id"]) & set(prev["stock_id"])
+            if not common_stocks:
+                continue
+            latest = latest[latest["stock_id"].isin(common_stocks)].sort_values("stock_id").reset_index(drop=True)
+            prev = prev[prev["stock_id"].isin(common_stocks)].sort_values("stock_id").reset_index(drop=True)
+            if not prev2.empty:
+                prev2 = prev2[prev2["stock_id"].isin(common_stocks)].sort_values("stock_id").reset_index(drop=True)
+            else:
+                prev2 = None
+
+            pair_signals = VectorizedSignalDetector._detect_signals_for_day_pair(
+                latest, prev, prev2
             )
+            all_signals.extend(pair_signals)
 
-        # 18. 跌停開板（盤中跌停後開板：最低 = 跌停價但收盤 > 跌停）
-        limit_down_break = (
-            (abs(latest["low"] - limit_down_price) / limit_down_price < 0.005)
-            & (latest["close"] > limit_down_price * 1.01)
-            & ~limit_down
+        empty_df = pd.DataFrame(
+            columns=["stock_id", "signal_name", "signal_type", "score", "trigger_date", "date"]
         )
-        if limit_down_break.any():
-            new_signals.append(
-                latest[limit_down_break][["stock_id", "date"]].assign(
-                    signal_name="跌停開板",
-                    signal_type=SIGNAL_TYPE_CROSSOVER,
-                    score=SignalScore.LIMIT_DOWN_BREAK,
-                    trigger_date=latest[limit_down_break]["date"],
-                )
-            )
 
-        # 合併所有新觸發的訊號
-        if not new_signals:
-            return pd.DataFrame(
-                columns=[
-                    "stock_id",
-                    "signal_name",
-                    "signal_type",
-                    "score",
-                    "trigger_date",
-                    "date",
-                ]
-            )
+        if not all_signals:
+            return empty_df
 
-        all_new = pd.concat(new_signals, ignore_index=True)
+        all_new = pd.concat(all_signals, ignore_index=True)
 
-        # 過濾重複：如果該訊號在最近 5 天內已經觸發過，則不重複記錄
+        if all_new.empty:
+            return empty_df
+
+        # 自身去重：同一股票同一訊號，保留最早 trigger_date
+        all_new = (
+            all_new.sort_values("trigger_date")
+            .drop_duplicates(subset=["stock_id", "signal_name"], keep="first")
+            .reset_index(drop=True)
+        )
+
+        # 歷史去重：如果該訊號在最近 5 天內已經觸發過，則不重複記錄
         if history_df is not None and not history_df.empty:
             all_new = VectorizedSignalDetector._filter_duplicate_crossovers(
                 all_new, history_df

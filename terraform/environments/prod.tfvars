@@ -34,7 +34,7 @@ google_client_id = "647618039886-tu8om4vec6cma6kfnjen7v89fcquc2t6.apps.googleuse
 
 # ⚠️ 請設定允許訪問的 email 白名單（逗號分隔，無空格）
 # 範例：allowed_emails = "user1@gmail.com,user2@gmail.com,user3@gmail.com"
-allowed_emails = "yellow24681379@gmail.com,souffle1988@gmail.com"
+allowed_emails = "yellow24681379@gmail.com,souffle1988@gmail.com,edwardytc@gmail.com"
 
 # 資料保留策略（線上版保留 250 個交易日）
 environment_type    = "production"

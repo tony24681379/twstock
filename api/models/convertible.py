@@ -29,6 +29,7 @@ class ConvertibleBondListItem(BaseModel):
     arbitrage_spread: Optional[float] = Field(None, description="套利空間 (%)")
     normalized_score: int = Field(0, description="套利評分 (0-100)")
     signal_count: int = Field(0, description="觸發訊號數")
+    signals: List[CBSignal] = Field(default_factory=list, description="套利訊號明細")
     risk_level: str = Field("觀望", description="風險等級")
     maturity_date: Optional[datetime] = Field(None, description="到期日")
     volume: Optional[float] = Field(None, description="成交量")

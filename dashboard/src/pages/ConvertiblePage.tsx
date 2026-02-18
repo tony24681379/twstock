@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { fetchConvertibleBonds } from '../lib/api'
+import SignalTooltip from '../components/SignalTooltip'
 import type { ConvertibleBondListItem } from '../types/stock'
 
 /** 評分色彩 */
@@ -193,10 +194,17 @@ export default function ConvertiblePage() {
                   }`}>
                     {bond.arbitrage_spread != null ? `${bond.arbitrage_spread.toFixed(2)}%` : '-'}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${getScoreBadgeClass(bond.normalized_score)}`}>
+                  <td className="px-4 py-3 whitespace-nowrap text-center relative group">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold cursor-default ${getScoreBadgeClass(bond.normalized_score)}`}>
                       {bond.normalized_score}
                     </span>
+                    {bond.signals && bond.signals.length > 0 && (
+                      <SignalTooltip
+                        title={`套利訊號 (${bond.signal_count})`}
+                        signals={bond.signals}
+                        show={true}
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-center">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getRiskBadgeClass(bond.risk_level)}`}>
@@ -215,6 +223,7 @@ export default function ConvertiblePage() {
           </table>
         </div>
       </div>
+
     </div>
   )
 }

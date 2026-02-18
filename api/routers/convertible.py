@@ -77,6 +77,7 @@ async def list_convertible_bonds(
                     COALESCE(s.normalized_score, 0) as normalized_score,
                     COALESCE(s.signal_count, 0) as signal_count,
                     COALESCE(s.risk_level, '觀望') as risk_level,
+                    s.signals_json,
                     s.premium_rate, s.conversion_value, s.updated_at,
                     sl.name as stock_name,
                     d_latest.close as cb_close,
@@ -111,6 +112,12 @@ async def list_convertible_bonds(
         if arb_spread is None and premium is not None:
             arb_spread = round(-float(premium) - 0.6, 2)
 
+        signals = []
+        if r.get("signals_json"):
+            raw = r["signals_json"]
+            sig_list = json.loads(raw) if isinstance(raw, str) else raw
+            signals = [CBSignal(**s) for s in sig_list]
+
         items.append(ConvertibleBondListItem(
             bond_id=r["bond_id"],
             name=r["name"] or "",
@@ -123,6 +130,7 @@ async def list_convertible_bonds(
             arbitrage_spread=arb_spread,
             normalized_score=r.get("normalized_score") or 0,
             signal_count=r.get("signal_count") or 0,
+            signals=signals,
             risk_level=r.get("risk_level") or "觀望",
             maturity_date=r.get("maturity_date"),
             volume=r.get("cb_volume"),

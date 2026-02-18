@@ -52,6 +52,7 @@ export interface StockListItem {
   chip_signals: ChipSignal[]
   technical_signals?: ChipSignal[]    // 技術訊號（optional）
   fundamental_signals?: ChipSignal[]  // 基本面訊號（optional）
+  recent_events?: ChipSignal[]       // 近期事件（漲跌停等）
 
   // 權重配置（optional）
   weights?: {
@@ -60,8 +61,9 @@ export interface StockListItem {
     fundamental: number
   }
 
-  // 可轉債套利分數
+  // 可轉債套利
   cb_arbitrage_score?: number | null  // 0-100，無 CB 為 null
+  cb_signals?: ChipSignal[]           // 可轉債套利訊號
 
   // 向後相容
   signal_strength: number // 映射為 overall_strength
@@ -84,6 +86,7 @@ export interface ConvertibleBondListItem {
   arbitrage_spread: number | null
   normalized_score: number
   signal_count: number
+  signals: CBSignal[]
   risk_level: string
   maturity_date: string | null
   volume: number | null
@@ -192,6 +195,7 @@ export interface StockDetail {
   chip_signals: ChipSignal[]
   technical_signals?: ChipSignal[]    // 技術訊號（optional）
   fundamental_signals?: ChipSignal[]  // 基本面訊號（optional）
+  recent_events?: ChipSignal[]       // 近期事件（漲跌停等）
 
   expected_return: number
   win_rate: number

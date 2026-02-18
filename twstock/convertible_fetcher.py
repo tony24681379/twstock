@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 TPEX_OPENAPI = "https://www.tpex.org.tw/openapi/v1/bond_ISSBD5_data"
 TPEX_CB_DAY_QRY = "https://www.tpex.org.tw/www/zh-tw/bond/cbDayQry"
 
+# 取所有股票最新收盤價（用於補齊 CB 標的股收盤價）
+TWSE_STOCK_DAY_ALL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+TPEX_MAINBOARD_QUOTES = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
+
 
 class ConvertibleBondFetcher:
     """可轉債爬蟲，使用 TPEX 櫃買中心 API 取得資料"""
@@ -46,6 +50,48 @@ class ConvertibleBondFetcher:
     async def close(self):
         if self._client and not self._client.is_closed:
             await self._client.aclose()
+
+    async def fetch_all_stock_close_prices(self) -> dict[str, float]:
+        """從 TWSE + TPEX Open Data 取得所有股票最新收盤價
+
+        Returns:
+            {stock_id: close_price} 映射，涵蓋上市 + 上櫃所有股票
+        """
+        close_map: dict[str, float] = {}
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            # TWSE 上市股票
+            try:
+                resp = await client.get(TWSE_STOCK_DAY_ALL)
+                resp.raise_for_status()
+                for row in resp.json():
+                    code = row.get("Code", "").strip()
+                    price = _safe_float(row.get("ClosingPrice"))
+                    if code and price:
+                        close_map[code] = price
+                logger.info(f"✅ TWSE 收盤價: {len(close_map)} 檔上市股票")
+            except Exception as e:
+                logger.warning(f"⚠️ 無法取得 TWSE 收盤價: {e}")
+
+            # TPEX 上櫃股票
+            tpex_count = 0
+            try:
+                resp = await client.get(TPEX_MAINBOARD_QUOTES)
+                resp.raise_for_status()
+                for row in resp.json():
+                    code = row.get("SecuritiesCompanyCode", "").strip()
+                    price = _safe_float(row.get("Close"))
+                    if code and price:
+                        close_map[code] = price
+                        tpex_count += 1
+                logger.info(f"✅ TPEX 收盤價: {tpex_count} 檔上櫃股票")
+            except Exception as e:
+                logger.warning(f"⚠️ 無法取得 TPEX 收盤價: {e}")
+
+        return close_map
 
     async def get_convertible_bond_list(self) -> list[dict]:
         """取得所有可轉債清單與基本資訊
@@ -222,8 +268,12 @@ class ConvertibleBondFetcher:
             date_str = trade_date.strftime("%Y-%m-%d")
 
             underlying_close = None
-            if underlying_close_map and date_str in underlying_close_map:
-                underlying_close = underlying_close_map[date_str]
+            if underlying_close_map:
+                if date_str in underlying_close_map:
+                    underlying_close = underlying_close_map[date_str]
+                elif "latest" in underlying_close_map:
+                    # 從 TWSE/TPEX Open Data 補齊的收盤價（僅最新一天）
+                    underlying_close = underlying_close_map["latest"]
 
             conversion_value = None
             premium_rate = None
