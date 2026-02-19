@@ -146,6 +146,16 @@ export default function ConvertibleDetailPage() {
             <InfoRow label="賣回日" value={bond.put_date ? new Date(bond.put_date).toLocaleDateString('zh-TW') : '-'} />
             <InfoRow label="賣回價" value={bond.put_price != null ? bond.put_price.toFixed(2) : '-'} />
             <InfoRow label="成交量" value={bond.volume != null ? Math.round(bond.volume).toLocaleString() : '-'} />
+            <InfoRow label="發行總量" value={bond.issued_amount != null ? `${Math.round(bond.issued_amount).toLocaleString()} 張` : '-'} />
+            <InfoRow label="流通餘額" value={bond.outstanding_amount != null ? `${Math.round(bond.outstanding_amount).toLocaleString()} 張` : '-'} />
+            <InfoRow
+              label="集中度"
+              value={
+                bond.outstanding_amount != null && bond.issued_amount != null && bond.issued_amount > 0
+                  ? `${((bond.outstanding_amount / bond.issued_amount) * 100).toFixed(1)}%`
+                  : '-'
+              }
+            />
             <InfoRow label="標的股綜合強度" value={String(bond.underlying_overall_strength)} />
           </div>
         </div>

@@ -34,7 +34,7 @@ function getRiskBadgeClass(risk: string): string {
 
 const SORTABLE_FIELDS = [
   'normalized_score', 'premium_rate', 'arbitrage_spread',
-  'volume', 'maturity_date', 'bond_id', 'conversion_value',
+  'maturity_date', 'bond_id', 'conversion_value',
 ] as const
 
 export default function ConvertiblePage() {
@@ -145,9 +145,6 @@ export default function ConvertiblePage() {
                   套利評分{getSortIndicator('normalized_score')}
                 </th>
                 <th className={`${thClass('')} text-center`}>風險等級</th>
-                <th onClick={() => handleSort('volume')} className={`${thClass('volume')} text-right`}>
-                  成交量{getSortIndicator('volume')}
-                </th>
                 <th onClick={() => handleSort('maturity_date')} className={`${thClass('maturity_date')} text-center`}>
                   到期日{getSortIndicator('maturity_date')}
                 </th>
@@ -210,9 +207,6 @@ export default function ConvertiblePage() {
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getRiskBadgeClass(bond.risk_level)}`}>
                       {bond.risk_level}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900 dark:text-gray-100">
-                    {bond.volume != null ? Math.round(bond.volume).toLocaleString() : '-'}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-sm text-center text-gray-600 dark:text-gray-400">
                     {bond.maturity_date ? new Date(bond.maturity_date).toLocaleDateString('zh-TW') : '-'}
