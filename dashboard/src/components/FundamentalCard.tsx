@@ -96,7 +96,22 @@ function EarningTab({ info }: { info: FundamentalInfo }) {
   const epsChartData = info.eps_recent_4q.map((eps, i) => ({
     quarter: `Q${info.eps_recent_4q.length - i}`,
     eps: eps,
+    predicted: null as number | null,
   })).reverse()
+
+  // 加入 EPS 預測虛線點
+  const prediction = info.eps_prediction
+  if (prediction) {
+    // 最後一個實際值也要有 predicted 值（連接虛線起點）
+    if (epsChartData.length > 0) {
+      epsChartData[epsChartData.length - 1].predicted = epsChartData[epsChartData.length - 1].eps
+    }
+    epsChartData.push({
+      quarter: `Q${prediction.target_quarter}(預測)`,
+      eps: null as unknown as number,
+      predicted: prediction.value,
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -104,6 +119,11 @@ function EarningTab({ info }: { info: FundamentalInfo }) {
       <div>
         <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
           最近 4 季 EPS 趨勢
+          {prediction && (
+            <span className="ml-2 text-xs font-normal text-amber-500">
+              含預測值
+            </span>
+          )}
         </h3>
         <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
           <ResponsiveContainer width="100%" height={180}>
@@ -130,7 +150,20 @@ function EarningTab({ info }: { info: FundamentalInfo }) {
                 stroke="#3B82F6"
                 strokeWidth={2}
                 dot={{ fill: '#3B82F6', r: 4 }}
+                connectNulls={false}
               />
+              {prediction && (
+                <Line
+                  type="monotone"
+                  dataKey="predicted"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  dot={{ fill: '#f59e0b', r: 4, strokeDasharray: '' }}
+                  connectNulls={false}
+                  name="預測 EPS"
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -395,6 +428,25 @@ function RevenueTab({ info }: { info: FundamentalInfo }) {
 // Tab 3: 估值指標 - 4 個指標卡片
 // ============================================================
 function ValuationTab({ info }: { info: FundamentalInfo }) {
+  // PSR 文字描述
+  const getPsrLabel = (psr: number | null | undefined) => {
+    if (psr == null) return { text: '-', color: 'text-gray-400' }
+    if (psr <= 1) return { text: '偏低', color: 'text-green-600 dark:text-green-400' }
+    if (psr > 10) return { text: '偏高', color: 'text-red-600 dark:text-red-400' }
+    return { text: '合理', color: 'text-gray-900 dark:text-white' }
+  }
+  const psrLabel = getPsrLabel(info.psr)
+
+  // 歷史股利圖表資料（年度由舊到新）
+  const dividendChartData = (info.dividend_history ?? [])
+    .slice()
+    .reverse()
+    .map(d => ({
+      year: `${d.year}年`,
+      cash: d.cash_dividend,
+      stock: d.stock_dividend,
+    }))
+
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -407,6 +459,17 @@ function ValuationTab({ info }: { info: FundamentalInfo }) {
           </div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
             {info.per !== null ? info.per.toFixed(1) : 'N/A'}
+          </div>
+        </div>
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+          <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            PSR（股價營收比）
+          </div>
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+            {info.psr != null ? info.psr.toFixed(2) : '-'}
+          </div>
+          <div className={`text-xs mt-1 ${psrLabel.color}`}>
+            {psrLabel.text}
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
@@ -434,6 +497,36 @@ function ValuationTab({ info }: { info: FundamentalInfo }) {
           </div>
         </div>
       </div>
+
+      {/* 歷史股利趨勢圖 */}
+      {dividendChartData.length > 1 && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            歷史股利趨勢
+          </h3>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={dividendChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                <XAxis dataKey="year" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1f2937',
+                    border: 'none',
+                    borderRadius: '8px',
+                    color: '#f9fafb',
+                  }}
+                />
+                <Bar dataKey="cash" name="現金股利" fill="#10b981" radius={[4, 4, 0, 0]} />
+                {dividendChartData.some(d => d.stock > 0) && (
+                  <Bar dataKey="stock" name="股票股利" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

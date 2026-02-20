@@ -252,6 +252,24 @@ class MonthlyRevenueDetail(BaseModel):
         from_attributes = True
 
 
+class EPSPrediction(BaseModel):
+    """EPS 預測結果"""
+
+    value: float = Field(..., description="預測 EPS")
+    target_year: int = Field(..., description="預測目標年度")
+    target_quarter: int = Field(..., ge=1, le=4, description="預測目標季度")
+    method: str = Field(..., description="預測方法")
+    is_prediction: bool = Field(True, description="是否為預測值")
+
+
+class DividendDetail(BaseModel):
+    """歷史股利資料"""
+
+    year: int = Field(..., description="年度（民國年）")
+    cash_dividend: float = Field(..., description="現金股利")
+    stock_dividend: float = Field(0.0, description="股票股利")
+
+
 class FundamentalInfo(BaseModel):
     """基本面資訊（詳細頁專用）"""
 
@@ -271,7 +289,7 @@ class FundamentalInfo(BaseModel):
     fundamental_signals: List[ChipSignal] = Field(
         default_factory=list, description="基本面訊號"
     )
-    fundamental_strength: int = Field(..., ge=-73, le=93, description="基本面強度評分（原始分數）")
+    fundamental_strength: int = Field(..., ge=-110, le=139, description="基本面強度評分（原始分數）")
 
     # 🆕 營收成長（新增）
     revenue_recent_12m: List[float] = Field(
@@ -288,6 +306,17 @@ class FundamentalInfo(BaseModel):
     holding_info: Optional[HoldingInfo] = Field(None, description="持股結構")
     revenue_details: List[MonthlyRevenueDetail] = Field(
         default_factory=list, description="月營收詳細資料"
+    )
+
+    # 🆕 PSR 估值
+    psr: Optional[float] = Field(None, description="股價營收比 (PSR)")
+
+    # 🆕 EPS 預測
+    eps_prediction: Optional[EPSPrediction] = Field(None, description="EPS 預測")
+
+    # 🆕 歷史股利
+    dividend_history: List[DividendDetail] = Field(
+        default_factory=list, description="歷史股利（最近5年）"
     )
 
 

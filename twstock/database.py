@@ -163,6 +163,23 @@ class StockEPS(Base):
     )
 
 
+class StockDividend(Base):
+    """股票歷史股利資料表"""
+
+    __tablename__ = "stock_dividend"
+
+    stock_id = Column(String, primary_key=True, index=True, comment="股票代號")
+    year = Column(Integer, primary_key=True, comment="年度（民國年）")
+    cash_dividend = Column(Float, comment="現金股利")
+    stock_dividend = Column(Float, comment="股票股利")
+    updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+
+    __table_args__ = (
+        Index("idx_dividend_stock", "stock_id"),
+        Index("idx_dividend_year", "year"),
+    )
+
+
 class StockMonthlyRevenue(Base):
     """股票月營收資料表"""
 
@@ -468,7 +485,7 @@ class StockListCache(Base):
     tech_signals_json = Column(String, comment="技術訊號 JSON")
 
     # 基本面維度
-    fund_raw_score = Column(Integer, default=0, comment="基本面原始分數 (-73~+93)")
+    fund_raw_score = Column(Integer, default=0, comment="基本面原始分數 (-110~+139)")
     fund_normalized = Column(Integer, default=0, comment="基本面標準化分數 (0-100)")
     fund_signals_json = Column(String, comment="基本面訊號 JSON")
 
@@ -648,6 +665,42 @@ class DatabaseManager:
                         ),
                         eps_records,
                     )
+
+    async def save_stock_dividends(self, stock_id: str, dividends_list: List[dict]):
+        """批次儲存歷史股利資料（UPSERT）
+
+        Args:
+            stock_id: 股票代碼
+            dividends_list: [{year, cash_dividend, stock_dividend}, ...]
+        """
+        stock_id = stock_id.lower()
+        if not dividends_list:
+            return
+
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO stock_dividend (stock_id, year, cash_dividend, stock_dividend, updated_at)
+                        VALUES (:stock_id, :year, :cash_dividend, :stock_dividend, :updated_at)
+                        ON CONFLICT (stock_id, year) DO UPDATE SET
+                            cash_dividend = EXCLUDED.cash_dividend,
+                            stock_dividend = EXCLUDED.stock_dividend,
+                            updated_at = EXCLUDED.updated_at
+                    """
+                    ),
+                    [
+                        {
+                            "stock_id": stock_id,
+                            "year": d["year"],
+                            "cash_dividend": d.get("cash_dividend", 0),
+                            "stock_dividend": d.get("stock_dividend", 0),
+                            "updated_at": datetime.now(),
+                        }
+                        for d in dividends_list
+                    ],
+                )
 
     async def save_daily_data(self, stock_id: str, daily_data: pd.DataFrame):
         """儲存每日交易資料（使用批次 SQL INSERT）"""
@@ -1562,7 +1615,7 @@ class DatabaseManager:
                     "id": row.stock_id,
                     "capital": row.capital,
                     "outstanding_shares": row.outstanding_shares,
-                    "PER": row.per,
+                    "per": row.per,
                     "cash_dividend": row.cash_dividend,
                     "stock_dividend": row.stock_dividend,
                 }
@@ -1661,6 +1714,72 @@ class DatabaseManager:
                 if stock_id not in result_dict:
                     result_dict[stock_id] = pd.DataFrame(
                         columns=["year", "quarter", "eps"]
+                    )
+
+            return result_dict
+
+    async def bulk_load_dividends(
+        self, stock_ids: List[str], years: int = 5
+    ) -> Dict[str, pd.DataFrame]:
+        """批次載入最近 N 年歷史股利（使用單一 SQL 查詢）
+
+        Args:
+            stock_ids: 股票代碼列表
+            years: 要載入的年數（預設 5 年）
+
+        Returns:
+            Dict[stock_id, DataFrame]: 每支股票的股利 DataFrame
+            DataFrame columns: [year, cash_dividend, stock_dividend]
+            已按 year DESC 排序（最新年度在前）
+        """
+        stock_ids = [sid.lower() for sid in stock_ids]
+
+        async with self.get_session() as session:
+            result = await session.execute(
+                text(
+                    """
+                    WITH ranked_div AS (
+                        SELECT
+                            stock_id,
+                            year,
+                            cash_dividend,
+                            stock_dividend,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY stock_id
+                                ORDER BY year DESC
+                            ) AS rn
+                        FROM stock_dividend
+                        WHERE stock_id = ANY(:stock_ids)
+                    )
+                    SELECT stock_id, year, cash_dividend, stock_dividend
+                    FROM ranked_div
+                    WHERE rn <= :years
+                    ORDER BY stock_id, year DESC
+                """
+                ),
+                {"stock_ids": stock_ids, "years": years},
+            )
+
+            from collections import defaultdict
+
+            div_dict = defaultdict(list)
+            for row in result:
+                div_dict[row.stock_id].append(
+                    {
+                        "year": row.year,
+                        "cash_dividend": row.cash_dividend,
+                        "stock_dividend": row.stock_dividend,
+                    }
+                )
+
+            result_dict = {}
+            for stock_id, div_list in div_dict.items():
+                result_dict[stock_id] = pd.DataFrame(div_list)
+
+            for stock_id in stock_ids:
+                if stock_id not in result_dict:
+                    result_dict[stock_id] = pd.DataFrame(
+                        columns=["year", "cash_dividend", "stock_dividend"]
                     )
 
             return result_dict

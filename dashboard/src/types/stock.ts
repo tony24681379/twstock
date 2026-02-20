@@ -40,7 +40,7 @@ export interface StockListItem {
   // 三種強度（籌碼 + 技術 + 基本面）- 原始分數（可為負數）
   chip_strength: number        // -25 to +89（原始分數）
   technical_strength: number   // -120 to +164（原始分數）
-  fundamental_strength: number // -73 to +93（原始分數）
+  fundamental_strength: number // -110 to +139（原始分數）
   overall_strength: number     // 0-100（標準化分數）
 
   signal_count: number
@@ -272,7 +272,7 @@ export interface FundamentalInfo {
 
   // 訊號
   fundamental_signals: ChipSignal[]
-  fundamental_strength: number   // -73 to +93（原始分數）
+  fundamental_strength: number   // -110 to +139（原始分數）
 
   // 🆕 營收成長
   revenue_recent_12m?: number[]        // 最近12個月營收（千元）
@@ -284,4 +284,25 @@ export interface FundamentalInfo {
   capital_info?: CapitalInfo            // 股本資訊
   holding_info?: HoldingInfo            // 持股結構
   revenue_details?: MonthlyRevenueDetail[]  // 月營收詳細資料
+
+  // 🆕 PSR / EPS 預測 / 歷史股利
+  psr?: number | null                   // 股價營收比
+  eps_prediction?: EPSPrediction | null // EPS 預測
+  dividend_history?: DividendDetail[]   // 歷史股利（最近 5 年）
+}
+
+// 🆕 EPS 預測結果
+export interface EPSPrediction {
+  value: number                // 預測 EPS
+  target_year: number          // 預測目標年度
+  target_quarter: number       // 預測目標季度 (1-4)
+  method: string               // 預測方法
+  is_prediction: boolean       // 是否為預測值
+}
+
+// 🆕 歷史股利資料
+export interface DividendDetail {
+  year: number                 // 年度（民國年）
+  cash_dividend: number        // 現金股利
+  stock_dividend: number       // 股票股利
 }

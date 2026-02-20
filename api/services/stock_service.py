@@ -17,7 +17,9 @@ from api.models.stock import (
     ChipsData,
     ConcentrationDataPoint,
     ConcentrationSummary,
+    DividendDetail,
     EPSDetail,
+    EPSPrediction,
     FundamentalInfo,
     HoldingInfo,
     InstitutionalData,
@@ -809,11 +811,49 @@ class StockService:
             "outstanding_shares": stock_info.outstanding_shares,
         }
 
-        # 計算基本面訊號
+        # 🆕 載入月營收資料（提前載入，供訊號計算和展示共用）
+        revenue_dict = await api_db_manager.bulk_load_monthly_revenue(
+            [stock_id], months=12
+        )
+        revenue_df = revenue_dict.get(stock_id)
+
+        # 🆕 載入歷史股利資料
+        dividend_dict = await api_db_manager.bulk_load_dividends(
+            [stock_id], years=5
+        )
+        dividend_df = dividend_dict.get(stock_id)
+
+        # 🆕 計算 PSR = 市值 / 年營收
+        psr = None
+        if (
+            revenue_df is not None
+            and not revenue_df.empty
+            and current_price > 0
+            and stock_info.outstanding_shares
+            and stock_info.outstanding_shares > 0
+        ):
+            annual_revenue = revenue_df["revenue"].sum()  # 千元
+            if annual_revenue > 0:
+                market_cap = current_price * stock_info.outstanding_shares  # 元（outstanding_shares 單位為股）
+                annual_revenue_yuan = annual_revenue * 1000  # 元（revenue 單位為千元）
+                psr = round(market_cap / annual_revenue_yuan, 2)
+
+        # 計算基本面訊號（傳入營收、股利、PSR）
         fund_signals, fund_raw_score = FundamentalSignalService.calculate_signals(
-            stock_info_dict, eps_df, current_price
+            stock_info_dict, eps_df, current_price,
+            revenue_data=revenue_df,
+            dividend_history=dividend_df,
+            psr=psr,
         )
         fund_strength = FundamentalSignalService.normalize_score(fund_raw_score)
+
+        # 🆕 EPS 預測
+        eps_prediction_result = FundamentalSignalService.predict_next_eps(
+            eps_df, revenue_df
+        )
+        eps_prediction = None
+        if eps_prediction_result:
+            eps_prediction = EPSPrediction(**eps_prediction_result)
 
         # 計算 EPS 指標
         eps_recent_4q = []
@@ -883,13 +923,7 @@ class StockService:
                 latest_date=concentration.date,
             )
 
-        # 🆕 載入月營收資料
-        revenue_dict = await api_db_manager.bulk_load_monthly_revenue(
-            [stock_id], months=12
-        )
-        revenue_df = revenue_dict.get(stock_id)
-
-        # 計算營收指標
+        # 計算營收指標（revenue_df 已在上方載入）
         revenue_recent_12m = []
         revenue_yoy_avg = 0.0
         revenue_trend = "持平"
@@ -954,13 +988,24 @@ class StockService:
                 for signal in fund_signals
             ],
             fundamental_strength=fund_strength,
-            # 🆕 營收成長
+            # 營收成長
             revenue_recent_12m=revenue_recent_12m,
             revenue_yoy_avg=revenue_yoy_avg,
             revenue_trend=revenue_trend,
-            # 🆕 詳細數據
+            # 詳細數據
             eps_details=eps_details,
             capital_info=capital_info,
             holding_info=holding_info,
             revenue_details=revenue_details,
+            # 🆕 PSR / EPS 預測 / 歷史股利
+            psr=psr,
+            eps_prediction=eps_prediction,
+            dividend_history=[
+                DividendDetail(
+                    year=int(row["year"]),
+                    cash_dividend=float(row["cash_dividend"]),
+                    stock_dividend=float(row["stock_dividend"]),
+                )
+                for _, row in dividend_df.iterrows()
+            ] if dividend_df is not None and not dividend_df.empty else [],
         )

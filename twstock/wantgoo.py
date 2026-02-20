@@ -297,13 +297,28 @@ class WantgooFetcher(BaseFetcher):
 
         cash_dividend = 0
         stock_dividend = 0
+        dividends_history = []
         if len(dividend) > 0:
+            # 最新年度存入 stock_info（向後相容）
             if (
                 dividend[0]["period"] is not None
                 and str(datetime.datetime.now().year - 2011) in dividend[0]["period"]
             ):
                 cash_dividend = round(dividend[0]["cashDividend"], 2)
                 stock_dividend = round(dividend[0]["stockDividend"], 2)
+
+            # 所有年度存入歷史股利表
+            for d in dividend:
+                if d.get("period") is not None:
+                    try:
+                        year = int(d["period"].replace("年", "").strip())
+                        dividends_history.append({
+                            "year": year,
+                            "cash_dividend": round(d.get("cashDividend", 0), 2),
+                            "stock_dividend": round(d.get("stockDividend", 0), 2),
+                        })
+                    except (ValueError, TypeError):
+                        pass
 
         self.info = {
             "id": sid,
@@ -320,6 +335,8 @@ class WantgooFetcher(BaseFetcher):
         if save_to_db and self.db_manager:
             try:
                 await self.db_manager.save_stock_info(sid, self.info)
+                if dividends_history:
+                    await self.db_manager.save_stock_dividends(sid, dividends_history)
                 print(f"Stock info for {sid} saved to database")
             except Exception as e:
                 print(f"Error saving stock info to database: {e}")

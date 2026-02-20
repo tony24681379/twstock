@@ -45,6 +45,13 @@ class StockListCacheUpdater:
         bulk_eps = await self.db.bulk_load_eps(stock_ids, quarters=4)
         alert_map = await self.db.bulk_load_alert_status(stock_ids)
         cb_map = await self.db.get_cb_signals_by_underlying()
+        bulk_revenue = await self.db.bulk_load_monthly_revenue(stock_ids, months=12)
+        bulk_dividends = await self.db.bulk_load_dividends(stock_ids, years=5)
+
+        print(
+            f"   基本面資料載入: info={len(bulk_info)}, eps={len(bulk_eps)}, "
+            f"revenue={len(bulk_revenue)}, dividends={len(bulk_dividends)} (共 {len(stock_ids)} 股)"
+        )
 
         # 3. 逐股計算
         records = []
@@ -83,8 +90,25 @@ class StockListCacheUpdater:
             # -- 基本面 --
             fund_raw, fund_norm, fund_sigs_json = 0, 0, "[]"
             if sid in bulk_info:
+                revenue_df = bulk_revenue.get(sid)
+                dividend_df = bulk_dividends.get(sid)
+
+                psr = None
+                info = bulk_info[sid]
+                outstanding_shares = info.get("outstanding_shares")
+                if (revenue_df is not None and not revenue_df.empty
+                        and (s["close_price"] or 0) > 0
+                        and outstanding_shares and outstanding_shares > 0):
+                    annual_revenue = revenue_df["revenue"].sum()
+                    if annual_revenue > 0:
+                        market_cap = s["close_price"] * outstanding_shares
+                        psr = round(market_cap / (annual_revenue * 1000), 2)
+
                 fund_sigs, fund_raw = FundamentalSignalService.calculate_signals(
-                    bulk_info[sid], bulk_eps.get(sid), s["close_price"] or 0
+                    bulk_info[sid], bulk_eps.get(sid), s["close_price"] or 0,
+                    revenue_data=revenue_df,
+                    dividend_history=dividend_df,
+                    psr=psr,
                 )
                 fund_norm = FundamentalSignalService.normalize_score(fund_raw)
                 fund_sigs_json = json.dumps(
@@ -135,6 +159,16 @@ class StockListCacheUpdater:
                 "cb_signals_json": self._serialize_cb_signals(cb_map.get(sid)),
                 "updated_at": now,
             })
+
+        # 統計新訊號觸發數
+        new_signal_names = {"營收連續正成長", "營收加速成長", "營收由衰轉增", "營收連續衰退",
+                            "營收急凍", "股利連續成長", "股利大幅削減", "PSR偏低", "PSR過高"}
+        new_sig_count = sum(
+            1 for r in records
+            for s in json.loads(r["fund_signals_json"])
+            if s.get("name") in new_signal_names
+        )
+        print(f"   新基本面訊號觸發: {new_sig_count} 次 (共 {len(records)} 股)")
 
         # 4. 批次寫入
         await self.db.save_stock_list_cache(records)
