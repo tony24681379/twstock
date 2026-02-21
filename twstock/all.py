@@ -8,7 +8,8 @@ from datetime import date
 import pandas as pd
 
 from twstock import Stock
-from twstock.fetcher_manager import get_global_fetcher
+from twstock.batch_executor import batch_execute
+from twstock.fetcher_manager import get_db_manager, get_global_fetcher
 
 INDEX = [
     "id",
@@ -108,23 +109,26 @@ ORGANIZATION = "config/organization.csv"
 
 class All:
     def __init__(self):
-        self.fetcher = None  # 將在需要時初始化
-        self.results = []  # 初始化處理結果列表
+        self.fetcher = None
+        self.db_manager = None
+        self.results = []
 
-    async def _ensure_fetcher(self):
-        """確保 fetcher 已初始化"""
+    async def _ensure_resources(self):
+        """確保 fetcher 和 db_manager 已初始化"""
         if self.fetcher is None:
             self.fetcher = await get_global_fetcher()
+        if self.db_manager is None:
+            self.db_manager = await get_db_manager()
 
     async def get_all_stock_list(self):
-        await self._ensure_fetcher()
+        await self._ensure_resources()
         self.list = await self.fetcher.get_all_stock_list()
 
         # 保存股票清單到資料庫
-        if hasattr(self.fetcher, "db_manager") and self.fetcher.db_manager:
+        if self.db_manager:
             try:
                 print("💾 保存股票清單到資料庫...")
-                await self.fetcher.db_manager.save_stock_list(self.list)
+                await self.db_manager.save_stock_list(self.list)
                 print(f"✅ 已保存 {len(self.list)} 支股票到資料庫")
             except Exception as e:
                 print(f"❌ 保存股票清單失敗: {e}")
@@ -191,8 +195,8 @@ class All:
         # 步驟2: 從 DB 批次檢查哪些股票需要從 API 更新
         print(f"🔍 批次檢查股票更新狀態...")
         needs_update_map = {}
-        if hasattr(self.fetcher, "db_manager") and self.fetcher.db_manager:
-            needs_update_map = await self.fetcher.db_manager.bulk_check_needs_update(
+        if self.db_manager:
+            needs_update_map = await self.db_manager.bulk_check_needs_update(
                 all_stock_ids, days_threshold=1
             )
             needs_update_count = sum(1 for v in needs_update_map.values() if v)
@@ -211,63 +215,26 @@ class All:
 
         if stocks_need_update:
             print(f"\n📡 先更新需要從 API 取得的 {len(stocks_need_update)} 支股票...")
-            update_start_time = time.time()
-
             MAX_API_WORKERS = int(os.getenv("MAX_API_WORKERS", "10"))
-            api_semaphore = asyncio.Semaphore(MAX_API_WORKERS)
 
             async def update_stock_from_api(sid):
-                """從 API 更新股票並保存到資料庫"""
-                async with api_semaphore:
-                    try:
-                        stock = Stock(sid, fetcher=self.fetcher)
-                        # load_data 會自動從 API 抓取並保存到資料庫
-                        await stock.load_data()
-                        return sid, True
-                    except Exception as e:
-                        print(f"   ❌ {sid} 更新失敗: {e}")
-                        return sid, False
+                stock = Stock(sid, fetcher=self.fetcher, db_manager=self.db_manager)
+                await stock.load_data()
+                return sid, True
 
-            # 創建更新任務
-            update_tasks = [update_stock_from_api(sid) for sid in stocks_need_update]
-
-            print(f"   並發更新數: {MAX_API_WORKERS}")
-
-            updated_count = 0
-            failed_count = 0
-
-            for task in asyncio.as_completed(update_tasks):
-                sid, success = await task
-                if success:
-                    updated_count += 1
-                else:
-                    failed_count += 1
-
-                # 進度顯示
-                if updated_count % 10 == 0 or updated_count <= 50:
-                    elapsed = time.time() - update_start_time
-                    speed = updated_count / elapsed if elapsed > 0 else 0
-                    remaining = len(stocks_need_update) - updated_count - failed_count
-                    eta = remaining / speed if speed > 0 else 0
-                    print(
-                        f"   更新進度: [{updated_count + failed_count}/{len(stocks_need_update)}] "
-                        f"成功: {updated_count} 失敗: {failed_count} - "
-                        f"速度: {speed:.2f} 支/秒 - 預估剩餘: {int(eta/60)}分{int(eta%60)}秒"
-                    )
-
-            update_elapsed = time.time() - update_start_time
-            print(f"\n   ✓ API 更新完成！成功: {updated_count} 失敗: {failed_count}")
-            print(f"   耗時: {int(update_elapsed/60)}分{int(update_elapsed%60)}秒")
+            await batch_execute(
+                stocks_need_update, update_stock_from_api,
+                max_workers=MAX_API_WORKERS, label="API更新", progress_interval=10,
+            )
 
         # 步驟3.5: 批次更新月營收資料（智能檢查）
         print(f"\n📈 批次更新股票月營收資料...")
 
-        # ⭐ 新增：批次檢查哪些股票需要更新
         monthly_revenue_needs_update_map = {}
-        if hasattr(self.fetcher, "db_manager") and self.fetcher.db_manager:
+        if self.db_manager:
             print(f"🔍 批次檢查月營收更新狀態...")
             monthly_revenue_needs_update_map = (
-                await self.fetcher.db_manager.bulk_check_monthly_revenue_needs_update(
+                await self.db_manager.bulk_check_monthly_revenue_needs_update(
                     all_stock_ids
                 )
             )
@@ -282,7 +249,6 @@ class All:
                 f"   ✓ {total_stocks - needs_update_count}/{total_stocks} 支股票月營收已是最新"
             )
 
-        # ⭐ 修改：只更新需要更新的股票
         stocks_need_revenue_update = [
             sid
             for sid, needs_update in monthly_revenue_needs_update_map.items()
@@ -293,64 +259,18 @@ class All:
             print(
                 f"\n📡 更新需要從 API 取得的 {len(stocks_need_revenue_update)} 支股票月營收..."
             )
-            revenue_start_time = time.time()
-
             MAX_REVENUE_WORKERS = int(os.getenv("MAX_API_WORKERS", "10"))
-            revenue_semaphore = asyncio.Semaphore(MAX_REVENUE_WORKERS)
 
             async def update_monthly_revenue(sid):
-                """更新單支股票的月營收資料"""
-                async with revenue_semaphore:
-                    try:
-                        if hasattr(self.fetcher, "fetch_monthly_revenue"):
-                            await self.fetcher.fetch_monthly_revenue(
-                                sid, months=12, save_to_db=True
-                            )
-                            return sid, True
-                        else:
-                            return sid, False
-                    except Exception as e:
-                        # 忽略錯誤，某些股票可能沒有月營收資料
-                        return sid, False
+                df = await self.fetcher.fetch_monthly_revenue(sid, months=12)
+                if not df.empty and self.db_manager:
+                    await self.db_manager.save_monthly_revenue(sid, df)
+                return sid, True
 
-            # ⭐ 修改：只為需要更新的股票創建任務
-            revenue_tasks = [
-                update_monthly_revenue(sid) for sid in stocks_need_revenue_update
-            ]
-
-            print(f"   並發更新數: {MAX_REVENUE_WORKERS}")
-
-            revenue_updated_count = 0
-            revenue_failed_count = 0
-
-            for task in asyncio.as_completed(revenue_tasks):
-                sid, success = await task
-                if success:
-                    revenue_updated_count += 1
-                else:
-                    revenue_failed_count += 1
-
-                # 進度顯示
-                if revenue_updated_count % 50 == 0:
-                    elapsed = time.time() - revenue_start_time
-                    speed = revenue_updated_count / elapsed if elapsed > 0 else 0
-                    remaining = (
-                        len(stocks_need_revenue_update)
-                        - revenue_updated_count
-                        - revenue_failed_count
-                    )
-                    eta = remaining / speed if speed > 0 else 0
-                    print(
-                        f"   月營收更新進度: [{revenue_updated_count + revenue_failed_count}/{len(stocks_need_revenue_update)}] "
-                        f"成功: {revenue_updated_count} - "
-                        f"速度: {speed:.2f} 支/秒 - 預估剩餘: {int(eta/60)}分{int(eta%60)}秒"
-                    )
-
-            revenue_elapsed = time.time() - revenue_start_time
-            print(
-                f"\n   ✓ 月營收更新完成！成功: {revenue_updated_count} 失敗: {revenue_failed_count}"
+            await batch_execute(
+                stocks_need_revenue_update, update_monthly_revenue,
+                max_workers=MAX_REVENUE_WORKERS, label="月營收更新",
             )
-            print(f"   耗時: {int(revenue_elapsed/60)}分{int(revenue_elapsed%60)}秒")
         else:
             print(f"   ✓ 所有股票月營收已是最新，跳過更新")
 
@@ -359,14 +279,13 @@ class All:
         bulk_daily_data = {}
         bulk_info_data = {}
 
-        if hasattr(self.fetcher, "db_manager"):
+        if self.db_manager:
             print(f"   載入 {len(all_stock_ids)} 支股票的資料...")
-            # 使用批次 SQL 查詢（只查詢一次！）
             load_days = 100 if fast_mode else 150
-            bulk_daily_data = await self.fetcher.db_manager.bulk_load_daily_data(
+            bulk_daily_data = await self.db_manager.bulk_load_daily_data(
                 all_stock_ids, days=load_days
             )
-            bulk_info_data = await self.fetcher.db_manager.bulk_load_stock_info(
+            bulk_info_data = await self.db_manager.bulk_load_stock_info(
                 all_stock_ids
             )
             print(f"   ✓ 已載入 {len(bulk_daily_data)} 支股票的每日資料")
@@ -391,12 +310,12 @@ class All:
             )
 
             # Step 1: 批次從 DB 載入股票的集中度資料
-            if hasattr(self.fetcher, "db_manager"):
+            if self.db_manager:
                 print(
                     f"   載入 {len(stock_ids_for_concentration)} 支股票的集中度資料..."
                 )
                 self._concentration_data = (
-                    await self.fetcher.db_manager.bulk_load_concentration_data(
+                    await self.db_manager.bulk_load_concentration_data(
                         stock_ids_for_concentration, weeks=10
                     )
                 )
@@ -406,10 +325,8 @@ class All:
             stocks_need_api = []
             for sid in stock_ids_for_concentration:
                 if sid not in self._concentration_data:
-                    # DB 沒有資料，需要從 API 抓取
                     stocks_need_api.append(sid)
                 else:
-                    # 檢查資料是否過舊（超過 7 天）
                     df = self._concentration_data[sid]
                     if (
                         df.empty
@@ -420,55 +337,23 @@ class All:
             # Step 3: 只對需要更新的股票調用 API
             if stocks_need_api:
                 print(f"   {len(stocks_need_api)} 支股票需要從 API 更新...")
-
                 MAX_CONCENTRATION_WORKERS = int(
                     os.getenv("MAX_CONCENTRATION_WORKERS", "10")
                 )
-                concentration_semaphore = asyncio.Semaphore(MAX_CONCENTRATION_WORKERS)
 
                 async def fetch_concentration(sid):
-                    async with concentration_semaphore:
-                        try:
-                            # save_to_db=True 會自動儲存到資料庫
-                            return (
-                                sid,
-                                await self.fetcher.fetch_concentration_data(
-                                    sid, weeks=10, save_to_db=True
-                                ),
-                            )
-                        except Exception as e:
-                            print(f"   ❌ {sid} 籌碼集中度抓取失敗: {e}")
-                            return sid, pd.DataFrame()
+                    conc_df = await self.fetcher.fetch_concentration_data(sid, weeks=10)
+                    if not conc_df.empty and self.db_manager:
+                        await self.db_manager.save_concentration_data(sid, conc_df)
+                    return sid, conc_df
 
-                tasks = [fetch_concentration(sid) for sid in stocks_need_api]
-
-                completed_count = 0
-                api_success_count = 0
-                for task in asyncio.as_completed(tasks):
-                    sid, conc_df = await task
-                    completed_count += 1
-
-                    if not conc_df.empty:
-                        self._concentration_data[sid] = conc_df  # 更新字典
-                        api_success_count += 1
-
-                    # 進度顯示（每 50 支）
-                    if completed_count % 50 == 0:
-                        elapsed = time.time() - concentration_start
-                        speed = completed_count / elapsed if elapsed > 0 else 0
-                        remaining = (
-                            (len(stocks_need_api) - completed_count) / speed
-                            if speed > 0
-                            else 0
-                        )
-                        print(
-                            f"   更新進度: [{completed_count}/{len(stocks_need_api)}] - "
-                            f"速度: {speed:.2f} 支/秒 - 預估剩餘: {int(remaining)}秒"
-                        )
-
-                print(
-                    f"   ✓ 已從 API 更新 {api_success_count}/{len(stocks_need_api)} 支股票"
+                api_results = await batch_execute(
+                    stocks_need_api, fetch_concentration,
+                    max_workers=MAX_CONCENTRATION_WORKERS, label="集中度更新",
                 )
+                for sid, conc_df in api_results.items():
+                    if not conc_df.empty:
+                        self._concentration_data[sid] = conc_df
             else:
                 print(f"   ✓ 所有股票資料皆從 DB 載入，無需 API 更新")
 
@@ -495,7 +380,7 @@ class All:
 
                 # 批次更新到資料庫
                 if attention_stocks or disposal_stocks:
-                    await self.fetcher.db_manager.bulk_update_alert_status(
+                    await self.db_manager.bulk_update_alert_status(
                         attention_stocks, disposal_stocks
                     )
 
@@ -1299,9 +1184,9 @@ class All:
             stock.volume[-1],
             stock.info.capital,
             wave_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
+            stock.calc_change(stock.close[-1], stock.close[-1 * min(abs(wave_days) + 1, len(stock.close))]),
             trend_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * (abs(trend_days) + 1)]),
+            stock.calc_change(stock.close[-1], stock.close[-1 * min(abs(trend_days) + 1, len(stock.close))]),
             stock.season_upper,
             stock.calc_change(stock.close[-1], stock.season_upper),
             stock.season_lower,
@@ -1451,9 +1336,9 @@ class All:
             stock.volume[-1],
             stock.info.capital,
             wave_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * (abs(wave_days) + 1)]),
+            stock.calc_change(stock.close[-1], stock.close[-1 * min(abs(wave_days) + 1, len(stock.close))]),
             trend_days,
-            stock.calc_change(stock.close[-1], stock.close[-1 * (abs(trend_days) + 1)]),
+            stock.calc_change(stock.close[-1], stock.close[-1 * min(abs(trend_days) + 1, len(stock.close))]),
             stock.season_upper,
             stock.calc_change(stock.close[-1], stock.season_upper),
             stock.season_lower,

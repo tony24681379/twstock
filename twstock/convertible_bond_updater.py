@@ -25,7 +25,7 @@ async def update_convertible_bonds(db_manager):
     from api.services.convertible_signal_service import ConvertibleSignalService
     from twstock.convertible_fetcher import ConvertibleBondFetcher
 
-    cb_fetcher = ConvertibleBondFetcher(db_manager=db_manager)
+    cb_fetcher = ConvertibleBondFetcher()
     print("\n" + "=" * 60)
     print("📊 可轉債套利分析")
     print("=" * 60)

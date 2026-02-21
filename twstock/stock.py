@@ -36,9 +36,6 @@ class Stock(analytics.Analytics):
             from .fetcher_manager import get_global_fetcher
 
             self.fetcher = await get_global_fetcher()
-            # 從 fetcher 取得 db_manager
-            if self.db_manager is None:
-                self.db_manager = self.fetcher.db_manager
 
         if self.db_manager is None:
             from .fetcher_manager import get_db_manager
@@ -65,8 +62,12 @@ class Stock(analytics.Analytics):
 
         # 載入基本資訊
         if force_reload or not tracker or not tracker["info_loaded"]:
-            # 從 API 取得並儲存到資料庫
-            self.info_data = await self.fetcher.fetch_info(self.sid, save_to_db=True)
+            # 從 API 取得
+            self.info_data, dividends_history = await self.fetcher.fetch_info(self.sid)
+            # 儲存到資料庫
+            await self.db_manager.save_stock_info(self.sid, self.info_data)
+            if dividends_history:
+                await self.db_manager.save_stock_dividends(self.sid, dividends_history)
             # 更新追蹤狀態
             await self.db_manager.update_tracker(
                 self.sid, info_loaded=True, info_updated_at=datetime.now()
@@ -84,11 +85,13 @@ class Stock(analytics.Analytics):
                 else 1.0
             )
             self.daily_data = await self.fetcher.fetch_daily(
-                self.sid, 200, outstanding_shares, save_to_db=True
+                self.sid, 200, outstanding_shares=outstanding_shares
             )
 
+            # 儲存到資料庫
             if not self.daily_data.empty:
-                # 使用工具函數轉換 Pandas Timestamp 為 Python datetime
+                await self.db_manager.save_daily_data(self.sid, self.daily_data)
+
                 first_date = to_python_datetime(self.daily_data["date"].min())
                 last_date = to_python_datetime(self.daily_data["date"].max())
 
@@ -115,10 +118,11 @@ class Stock(analytics.Analytics):
                     else 1.0
                 )
                 recent_data = await self.fetcher.fetch_daily(
-                    self.sid, 30, outstanding_shares, save_to_db=True
+                    self.sid, 30, outstanding_shares=outstanding_shares
                 )
-                # 更新追蹤狀態
+                # 儲存到資料庫並更新追蹤狀態
                 if not recent_data.empty:
+                    await self.db_manager.save_daily_data(self.sid, recent_data)
                     last_date = to_python_datetime(recent_data["date"].max())
 
                     await self.db_manager.update_tracker(

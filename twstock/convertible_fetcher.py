@@ -26,8 +26,7 @@ TPEX_MAINBOARD_QUOTES = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quote
 class ConvertibleBondFetcher:
     """可轉債爬蟲，使用 TPEX 櫃買中心 API 取得資料"""
 
-    def __init__(self, db_manager=None):
-        self.db_manager = db_manager
+    def __init__(self):
         # TPEX 有安全機制，併發不能太高
         self._semaphore = asyncio.Semaphore(2)
         self._client: Optional[httpx.AsyncClient] = None

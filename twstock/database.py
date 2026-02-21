@@ -1615,7 +1615,7 @@ class DatabaseManager:
                     "id": row.stock_id,
                     "capital": row.capital,
                     "outstanding_shares": row.outstanding_shares,
-                    "per": row.per,
+                    "PER": row.per,
                     "cash_dividend": row.cash_dividend,
                     "stock_dividend": row.stock_dividend,
                 }

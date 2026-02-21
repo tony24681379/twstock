@@ -60,7 +60,7 @@ class VectorizedIndicatorEngine:
                 'macd_hist': hist
             }, index=group.index)
 
-        macd_data = df.groupby('stock_id', group_keys=False, observed=True).apply(calc_macd)
+        macd_data = df.groupby('stock_id', group_keys=False, observed=True).apply(calc_macd, include_groups=False)
         df[['macd', 'macd_signal', 'macd_hist']] = macd_data
 
         # ✅ 批次計算 KD（Stochastic Oscillator）
@@ -81,7 +81,7 @@ class VectorizedIndicatorEngine:
                 'd9': d
             }, index=group.index)
 
-        kd_data = df.groupby('stock_id', group_keys=False).apply(calc_kd)
+        kd_data = df.groupby('stock_id', group_keys=False).apply(calc_kd, include_groups=False)
         df[['k9', 'd9']] = kd_data
 
         # ✅ 批次計算 RSI
@@ -123,7 +123,7 @@ class VectorizedIndicatorEngine:
                 'bollinger_lower': lower
             }, index=group.index)
 
-        bb_data = df.groupby('stock_id', group_keys=False).apply(calc_bollinger)
+        bb_data = df.groupby('stock_id', group_keys=False).apply(calc_bollinger, include_groups=False)
         df[['bollinger_upper', 'bollinger_middle', 'bollinger_lower']] = bb_data
 
         return df
@@ -166,7 +166,7 @@ class VectorizedIndicatorEngine:
                 'macd_hist': hist
             }, index=group.index)
 
-        macd_data = df.groupby('stock_id', group_keys=False, observed=True).apply(calc_macd)
+        macd_data = df.groupby('stock_id', group_keys=False, observed=True).apply(calc_macd, include_groups=False)
         df[['macd', 'macd_signal', 'macd_hist']] = macd_data
         return df
 

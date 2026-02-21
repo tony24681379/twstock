@@ -7,7 +7,18 @@ conter_tuple = namedtuple("counter", ("index", "is_up"))
 
 
 class Analytics(object):
-    length = 30
+    _default_length = 30
+
+    @property
+    def length(self):
+        close = getattr(self, 'close', None)
+        if close is not None and hasattr(close, '__len__') and len(close) > 0:
+            return min(self._default_length, len(close))
+        return self._default_length
+
+    @length.setter
+    def length(self, value):
+        self._default_length = value
 
     def continuous(self, data):
         diff = [1 if data[-i] >= data[-i - 1] else -1 for i in range(1, len(data))]
