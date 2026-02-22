@@ -271,6 +271,12 @@ class All:
                 stocks_need_revenue_update, update_monthly_revenue,
                 max_workers=MAX_REVENUE_WORKERS, label="月營收更新",
             )
+
+            # 標記已檢查（無論成功或失敗）
+            if self.db_manager:
+                await self.db_manager.bulk_update_checked_at(
+                    stocks_need_revenue_update, "revenue_checked_at"
+                )
         else:
             print(f"   ✓ 所有股票月營收已是最新，跳過更新")
 
@@ -321,18 +327,17 @@ class All:
                 )
                 print(f"   ✓ 已從 DB 載入 {len(self._concentration_data)} 支股票的集中度資料")
 
-            # Step 2: 檢查哪些股票需要從 API 更新（DB 沒有或資料過舊）
+            # Step 2: 批次檢查哪些股票需要從 API 更新
             stocks_need_api = []
-            for sid in stock_ids_for_concentration:
-                if sid not in self._concentration_data:
-                    stocks_need_api.append(sid)
-                else:
-                    df = self._concentration_data[sid]
-                    if (
-                        df.empty
-                        or (datetime.datetime.now() - df.iloc[0]["date"]).days > 7
-                    ):
-                        stocks_need_api.append(sid)
+            if self.db_manager:
+                conc_needs_update = await self.db_manager.bulk_check_concentration_needs_update(
+                    stock_ids_for_concentration
+                )
+                stocks_need_api = [
+                    sid for sid, needs in conc_needs_update.items() if needs
+                ]
+            else:
+                stocks_need_api = stock_ids_for_concentration
 
             # Step 3: 只對需要更新的股票調用 API
             if stocks_need_api:
@@ -354,6 +359,12 @@ class All:
                 for sid, conc_df in api_results.items():
                     if not conc_df.empty:
                         self._concentration_data[sid] = conc_df
+
+                # 標記已檢查
+                if self.db_manager:
+                    await self.db_manager.bulk_update_checked_at(
+                        stocks_need_api, "concentration_checked_at"
+                    )
             else:
                 print(f"   ✓ 所有股票資料皆從 DB 載入，無需 API 更新")
 

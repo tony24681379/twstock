@@ -380,6 +380,9 @@ class StockUpdateTracker(Base):
     daily_first_date = Column(DateTime, comment="每日資料最早日期")
     daily_last_date = Column(DateTime, comment="每日資料最新日期")
     last_checked_at = Column(DateTime, comment="最後檢查時間")
+    revenue_checked_at = Column(DateTime, nullable=True, comment="月營收最後檢查時間")
+    concentration_checked_at = Column(DateTime, nullable=True, comment="集中度最後檢查時間")
+    info_checked_at = Column(DateTime, nullable=True, comment="基本資訊最後檢查時間")
     created_at = Column(DateTime, default=datetime.now, comment="建立時間")
     updated_at = Column(
         DateTime, default=datetime.now, onupdate=datetime.now, comment="更新時間"
@@ -567,6 +570,16 @@ class DatabaseManager:
             # pg_type_typname_nsp_index 重複而失敗，忽略即可
             pass
 
+        # 新增 checked_at 欄位（冪等操作，已存在則跳過）
+        try:
+            async with self.async_engine.begin() as conn:
+                for col in ("revenue_checked_at", "concentration_checked_at", "info_checked_at"):
+                    await conn.execute(text(
+                        f"ALTER TABLE stock_update_tracker ADD COLUMN IF NOT EXISTS {col} TIMESTAMP"
+                    ))
+        except Exception:
+            pass
+
     @asynccontextmanager
     async def get_session(self):
         """取得資料庫 session (使用 context manager)"""
@@ -593,7 +606,13 @@ class DatabaseManager:
                         """
                         INSERT INTO stock_info (stock_id, capital, outstanding_shares, per, cash_dividend, stock_dividend, updated_at)
                         VALUES (:stock_id, :capital, :outstanding_shares, :per, :cash_dividend, :stock_dividend, :updated_at)
-                        ON CONFLICT (stock_id) DO NOTHING
+                        ON CONFLICT (stock_id) DO UPDATE SET
+                            capital = EXCLUDED.capital,
+                            outstanding_shares = EXCLUDED.outstanding_shares,
+                            per = EXCLUDED.per,
+                            cash_dividend = EXCLUDED.cash_dividend,
+                            stock_dividend = EXCLUDED.stock_dividend,
+                            updated_at = EXCLUDED.updated_at
                     """
                     ),
                     {
@@ -660,7 +679,8 @@ class DatabaseManager:
                             """
                             INSERT INTO stock_eps (stock_id, year, quarter, eps)
                             VALUES (:stock_id, :year, :quarter, :eps)
-                            ON CONFLICT (stock_id, year, quarter) DO NOTHING
+                            ON CONFLICT (stock_id, year, quarter) DO UPDATE SET
+                                eps = EXCLUDED.eps
                         """
                         ),
                         eps_records,
@@ -984,8 +1004,8 @@ class DatabaseManager:
                        - cumulative_yoy_change: 累計年增率 (%)
 
         說明：
-            - 使用 ON CONFLICT DO NOTHING 實現忽略語意
-            - 主鍵衝突時不更新（保留舊資料）
+            - 使用 ON CONFLICT DO UPDATE 實現 UPSERT 語意
+            - 主鍵衝突時更新（確定值覆蓋初估值）
             - 批次插入所有記錄（效能優化）
         """
         stock_id = stock_id.lower()  # 統一使用小寫 ID
@@ -1031,7 +1051,7 @@ class DatabaseManager:
                         }
                     )
 
-                # 批次 INSERT ON CONFLICT DO NOTHING（有資料就忽略）
+                # 批次 UPSERT（有資料就更新）
                 if records:
                     await session.execute(
                         text(
@@ -1044,7 +1064,13 @@ class DatabaseManager:
                                 :stock_id, :year, :month, :revenue, :mom_change, :yoy_change,
                                 :cumulative_revenue, :cumulative_yoy_change, :updated_at
                             )
-                            ON CONFLICT (stock_id, year, month) DO NOTHING
+                            ON CONFLICT (stock_id, year, month) DO UPDATE SET
+                                revenue = EXCLUDED.revenue,
+                                mom_change = EXCLUDED.mom_change,
+                                yoy_change = EXCLUDED.yoy_change,
+                                cumulative_revenue = EXCLUDED.cumulative_revenue,
+                                cumulative_yoy_change = EXCLUDED.cumulative_yoy_change,
+                                updated_at = EXCLUDED.updated_at
                         """
                         ),
                         records,
@@ -1300,98 +1326,148 @@ class DatabaseManager:
             # 如果批次檢查失敗，回退到全部需要更新
             return {stock_id: True for stock_id in stock_ids}
 
+    async def bulk_update_checked_at(self, stock_ids: List[str], field: str):
+        """批次更新 checked_at 時間戳
+
+        Args:
+            stock_ids: 股票代碼列表
+            field: 欄位名稱（白名單驗證）
+        """
+        allowed_fields = ("revenue_checked_at", "concentration_checked_at", "info_checked_at")
+        if field not in allowed_fields:
+            raise ValueError(f"Invalid field: {field}. Allowed: {allowed_fields}")
+
+        if not stock_ids:
+            return
+
+        stock_ids = [sid.lower() for sid in stock_ids]
+        now = datetime.now()
+
+        async with self._db_semaphore:
+            async with self.get_session() as session:
+                await session.execute(
+                    text(f"""
+                        INSERT INTO stock_update_tracker (stock_id, {field}, last_checked_at, created_at, updated_at)
+                        VALUES (:stock_id, :checked_at, :checked_at, :checked_at, :checked_at)
+                        ON CONFLICT (stock_id) DO UPDATE SET
+                            {field} = EXCLUDED.{field},
+                            updated_at = EXCLUDED.updated_at
+                    """),
+                    [{"stock_id": sid, "checked_at": now} for sid in stock_ids],
+                )
+
     async def bulk_check_monthly_revenue_needs_update(
         self, stock_ids: List[str]
     ) -> Dict[str, bool]:
         """
         批次檢查多支股票的月營收是否需要更新
 
-        Args:
-            stock_ids: 股票代碼列表
-
-        Returns:
-            Dict[stock_id, needs_update]:
-            - True: 需要從 API 更新
-            - False: 資料庫已有最新資料
-
-        判斷邏輯:
-            1. DB 沒有資料 → 需要更新
-            2. 最新月份 < 當月 → 需要更新（例如 DB 有 2025/12，現在是 2026/01）
-            3. 已在當月且今日檢查過 → 不需要更新（冪等性）
+        判斷邏輯：
+            - revenue_checked_at >= today → 不需要更新（今日已檢查）
+            - 其他情況 → 需要更新
         """
         stock_ids = [sid.lower() for sid in stock_ids]
-        result = {}
+        today = date.today()
 
         try:
             async with self.get_session() as session:
-                # 一次查詢所有股票最新的月營收記錄（避免 N+1）
-                latest_result = await session.execute(
+                result_rows = await session.execute(
                     text("""
-                        WITH latest_revenue AS (
-                            SELECT
-                                stock_id,
-                                year,
-                                month,
-                                updated_at,
-                                ROW_NUMBER() OVER (
-                                    PARTITION BY stock_id
-                                    ORDER BY year DESC, month DESC
-                                ) as rn
-                            FROM stock_monthly_revenue
-                            WHERE stock_id = ANY(:stock_ids)
-                        )
-                        SELECT stock_id, year, month, updated_at
-                        FROM latest_revenue
-                        WHERE rn = 1
+                        SELECT stock_id, revenue_checked_at
+                        FROM stock_update_tracker
+                        WHERE stock_id = ANY(:stock_ids)
                     """),
                     {"stock_ids": stock_ids},
                 )
 
-                latest_data = {
-                    row.stock_id: {
-                        "year": row.year,
-                        "month": row.month,
-                        "updated_at": row.updated_at,
-                    }
-                    for row in latest_result.fetchall()
+                checked_map = {
+                    row.stock_id: row.revenue_checked_at
+                    for row in result_rows.fetchall()
                 }
 
-                # 判斷邏輯
-                current_year = datetime.now().year
-                current_month = datetime.now().month
-                today = date.today()
-
+                result = {}
                 for stock_id in stock_ids:
-                    if stock_id not in latest_data:
-                        # DB 沒有資料 → 需要更新
+                    checked_at = checked_map.get(stock_id)
+                    if checked_at and checked_at.date() >= today:
+                        result[stock_id] = False
+                    else:
                         result[stock_id] = True
-                        continue
-
-                    db_year = latest_data[stock_id]["year"]
-                    db_month = latest_data[stock_id]["month"]
-                    updated_at = latest_data[stock_id]["updated_at"]
-
-                    # 檢查是否已是當月最新資料
-                    if db_year == current_year and db_month == current_month:
-                        # 已在當月更新過，檢查是否今天已經檢查過（避免重複請求）
-                        if updated_at and updated_at.date() >= today:
-                            # 今天已經檢查過 → 不需要更新
-                            result[stock_id] = False
-                            continue
-
-                    # 判斷是否需要更新（考慮月份差異）
-                    # 例如：DB 有 2025/12，現在是 2026/01 → 需要更新
-                    db_month_total = db_year * 12 + db_month
-                    current_month_total = current_year * 12 + current_month
-
-                    # 最新月份 < 當月 → 需要更新
-                    result[stock_id] = db_month_total < current_month_total
 
                 return result
 
         except Exception as e:
-            print(f"⚠️  批次檢查月營收狀態失敗: {e}")
-            # 查詢失敗時，保守起見，全部標記為需要更新
+            print(f"批次檢查月營收狀態失敗: {e}")
+            return {stock_id: True for stock_id in stock_ids}
+
+    async def bulk_check_concentration_needs_update(
+        self, stock_ids: List[str]
+    ) -> Dict[str, bool]:
+        """
+        批次檢查多支股票的集中度是否需要更新
+
+        判斷邏輯：
+            1. DB 無集中度資料 → 需要更新
+            2. concentration_checked_at >= today → 不需要更新
+            3. DB 最新集中度日期距今 > 7 天 → 需要更新
+        """
+        stock_ids = [sid.lower() for sid in stock_ids]
+        today = date.today()
+
+        try:
+            async with self.get_session() as session:
+                # 查詢 tracker 的 checked_at
+                tracker_result = await session.execute(
+                    text("""
+                        SELECT stock_id, concentration_checked_at
+                        FROM stock_update_tracker
+                        WHERE stock_id = ANY(:stock_ids)
+                    """),
+                    {"stock_ids": stock_ids},
+                )
+                checked_map = {
+                    row.stock_id: row.concentration_checked_at
+                    for row in tracker_result.fetchall()
+                }
+
+                # 查詢每支股票最新的集中度日期
+                conc_result = await session.execute(
+                    text("""
+                        SELECT stock_id, MAX(date) as latest_date
+                        FROM concentration_data
+                        WHERE stock_id = ANY(:stock_ids)
+                        GROUP BY stock_id
+                    """),
+                    {"stock_ids": stock_ids},
+                )
+                latest_conc_map = {
+                    row.stock_id: row.latest_date
+                    for row in conc_result.fetchall()
+                }
+
+                result = {}
+                for stock_id in stock_ids:
+                    # 1. DB 無資料 → 需要更新
+                    if stock_id not in latest_conc_map:
+                        result[stock_id] = True
+                        continue
+
+                    # 2. 今日已檢查 → 不需要
+                    checked_at = checked_map.get(stock_id)
+                    if checked_at and checked_at.date() >= today:
+                        result[stock_id] = False
+                        continue
+
+                    # 3. 資料超過 7 天 → 需要
+                    latest_date = latest_conc_map[stock_id]
+                    if latest_date and (today - latest_date.date()).days > 7:
+                        result[stock_id] = True
+                    else:
+                        result[stock_id] = False
+
+                return result
+
+        except Exception as e:
+            print(f"批次檢查集中度狀態失敗: {e}")
             return {stock_id: True for stock_id in stock_ids}
 
     async def bulk_load_daily_data(
@@ -1938,6 +2014,11 @@ class DatabaseManager:
                         "analysis_updated_at", datetime.now()
                     )
 
+                for checked_field in ("revenue_checked_at", "concentration_checked_at", "info_checked_at"):
+                    if checked_field in kwargs:
+                        update_fields.append(f"{checked_field} = :{checked_field}")
+                        params[checked_field] = kwargs[checked_field]
+
                 await session.execute(
                     text(
                         f"""
@@ -1959,6 +2040,9 @@ class DatabaseManager:
                     "daily_first_date": kwargs.get("daily_first_date"),
                     "daily_last_date": kwargs.get("daily_last_date"),
                     "analysis_updated_at": kwargs.get("analysis_updated_at"),
+                    "revenue_checked_at": kwargs.get("revenue_checked_at"),
+                    "concentration_checked_at": kwargs.get("concentration_checked_at"),
+                    "info_checked_at": kwargs.get("info_checked_at"),
                     "last_checked_at": datetime.now(),
                     "created_at": datetime.now(),
                     "updated_at": datetime.now(),
@@ -1973,12 +2057,14 @@ class DatabaseManager:
                 await session.execute(
                     text(
                         """
-                        INSERT INTO stock_update_tracker 
-                        (stock_id, info_loaded, daily_loaded, info_updated_at, daily_updated_at, 
+                        INSERT INTO stock_update_tracker
+                        (stock_id, info_loaded, daily_loaded, info_updated_at, daily_updated_at,
                          daily_first_date, daily_last_date, analysis_updated_at,
+                         revenue_checked_at, concentration_checked_at, info_checked_at,
                          last_checked_at, created_at, updated_at)
                         VALUES (:stock_id, :info_loaded, :daily_loaded, :info_updated_at, :daily_updated_at,
                                 :daily_first_date, :daily_last_date, :analysis_updated_at,
+                                :revenue_checked_at, :concentration_checked_at, :info_checked_at,
                                 :last_checked_at, :created_at, :updated_at)
                     """
                     ),

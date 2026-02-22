@@ -60,8 +60,14 @@ class Stock(analytics.Analytics):
             await self.db_manager.get_tracker(self.sid) if not force_reload else None
         )
 
-        # 載入基本資訊
-        if force_reload or not tracker or not tracker["info_loaded"]:
+        # 載入基本資訊（info_checked_at 鮮度判斷：NULL 或超過 7 天才重新抓取）
+        info_checked_at = tracker.get("info_checked_at") if tracker else None
+        info_stale = (
+            not info_checked_at
+            or (datetime.now() - info_checked_at).days > 7
+        )
+
+        if force_reload or not tracker or info_stale:
             # 從 API 取得
             self.info_data, dividends_history = await self.fetcher.fetch_info(self.sid)
             # 儲存到資料庫
@@ -70,7 +76,8 @@ class Stock(analytics.Analytics):
                 await self.db_manager.save_stock_dividends(self.sid, dividends_history)
             # 更新追蹤狀態
             await self.db_manager.update_tracker(
-                self.sid, info_loaded=True, info_updated_at=datetime.now()
+                self.sid, info_loaded=True, info_updated_at=datetime.now(),
+                info_checked_at=datetime.now()
             )
         else:
             # 從資料庫載入
