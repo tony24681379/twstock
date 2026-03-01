@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { PAGINATION } from '../constants/apiConfig'
 import { fetchStocks } from '../lib/api'
 import { getSignalStrengthBadgeClass, getRawScoreBadgeClass } from '../lib/colorUtils'
 import { WeightController } from '../components/WeightController'
+import { SignalFilter } from '../components/SignalFilter'
 import SignalTooltip from '../components/SignalTooltip'
 import { AlertIcon } from '../components/AlertIcon'
 import type { StockListItem } from '../types/stock'
@@ -13,6 +14,7 @@ export default function HomePage() {
   const [stocks, setStocks] = useState<StockListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activeSignals, setActiveSignals] = useState<string[]>([])
 
   // 從 URL 讀取排序參數，預設為綜合強度降序
   const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'overall_strength')
@@ -86,6 +88,21 @@ export default function HomePage() {
     }
   }
 
+  // 訊號篩選（AND 邏輯）
+  const filteredStocks = useMemo(() => {
+    if (activeSignals.length === 0) return stocks
+    return stocks.filter(stock => {
+      const stockSignalNames = new Set([
+        ...(stock.chip_signals || []).map(s => s.name),
+        ...(stock.technical_signals || []).map(s => s.name),
+        ...(stock.fundamental_signals || []).map(s => s.name),
+        ...(stock.recent_events || []).map(s => s.name),
+        ...(stock.cb_signals || []).map(s => s.name),
+      ])
+      return activeSignals.every(sig => stockSignalNames.has(sig))
+    })
+  }, [stocks, activeSignals])
+
   const getSortIndicator = (field: string) => {
     if (sortBy !== field) return ''
     return order === 'asc' ? ' ↑' : ' ↓'
@@ -120,13 +137,23 @@ export default function HomePage() {
           股票列表
         </h2>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          共 {stocks.length} 支股票（已載入全部）
+          {activeSignals.length > 0
+            ? `符合條件: ${filteredStocks.length} / ${stocks.length} 支股票`
+            : `共 ${stocks.length} 支股票（已載入全部）`}
         </p>
       </div>
 
       {/* 權重控制器 */}
       <WeightController
         onChange={setWeights}
+        className="mb-6"
+      />
+
+      {/* 訊號篩選 */}
+      <SignalFilter
+        activeSignals={activeSignals}
+        onSignalsChange={setActiveSignals}
+        stocks={stocks}
         className="mb-6"
       />
 
@@ -184,7 +211,7 @@ export default function HomePage() {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {stocks.map((stock) => (
+              {filteredStocks.map((stock) => (
                 <tr
                   key={stock.stock_id}
                   className="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition-colors"
