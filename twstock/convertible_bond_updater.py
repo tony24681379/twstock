@@ -13,11 +13,12 @@ from openpyxl import load_workbook
 logger = logging.getLogger(__name__)
 
 
-async def update_convertible_bonds(db_manager):
+async def update_convertible_bonds(db_manager, api_latest_date=None):
     """批次更新所有可轉債資料：清單同步 → 每日交易資料 → 訊號計算
 
     Args:
         db_manager: DatabaseManager 實例
+        api_latest_date: 最新交易日期（由 HeaderManager 探測），用於智慧跳過已最新的 CB
 
     Returns:
         tuple: (signal_records, cb_score_map)
@@ -90,12 +91,37 @@ async def update_convertible_bonds(db_manager):
         if still_missing:
             print(f"⚠️  仍有 {still_missing} 檔標的股無收盤價")
 
-    # Step 3: 取得每日交易資料
-    print(f"📡 更新 {len(bonds)} 檔可轉債每日資料...")
-    all_daily = await cb_fetcher.fetch_all_cb_daily(bonds, stock_daily_map)
-    if all_daily:
-        await db_manager.save_convertible_bond_daily(all_daily)
-        print(f"✅ 儲存 {len(all_daily)} 筆 CB 每日資料")
+    # Step 3: 智慧更新每日交易資料（只抓需要更新的 CB）
+    bond_ids = [b["bond_id"] for b in bonds]
+    bond_map_by_id = {b["bond_id"]: b for b in bonds}
+    needs_update = await db_manager.bulk_check_cb_needs_update(
+        bond_ids, reference_date=api_latest_date
+    )
+    bonds_to_fetch = [bid for bid, need in needs_update.items() if need]
+    skipped_count = len(bond_ids) - len(bonds_to_fetch)
+
+    # 從 DB 載入所有 CB 的最新 daily 資料（用於訊號計算）
+    all_daily = []
+    if skipped_count > 0:
+        db_daily_map = await db_manager.bulk_load_convertible_bond_daily(bond_ids, days=30)
+        for bid, df in db_daily_map.items():
+            if not df.empty:
+                for _, row in df.iterrows():
+                    all_daily.append(row.to_dict())
+
+    if bonds_to_fetch:
+        ref_label = api_latest_date or date.today()
+        print(f"📡 更新 {len(bonds_to_fetch)}/{len(bond_ids)} 檔可轉債每日資料（基準日: {ref_label}）")
+        bonds_to_update = [bond_map_by_id[bid] for bid in bonds_to_fetch]
+        api_daily = await cb_fetcher.fetch_all_cb_daily(bonds_to_update, stock_daily_map)
+        if api_daily:
+            await db_manager.save_convertible_bond_daily(api_daily)
+            all_daily.extend(api_daily)
+            print(f"✅ 儲存 {len(api_daily)} 筆 CB 每日資料")
+        # 標記已檢查（含無成交的 CB，避免重複抓取）
+        await db_manager.bulk_update_cb_checked_at(bonds_to_fetch)
+    else:
+        print(f"✓ {skipped_count} 檔可轉債皆已是最新，無需 API 更新")
 
     # Step 4: 取得標的股 overall_strength (用於連動訊號)
     strength_map = {}

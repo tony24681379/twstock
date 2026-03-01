@@ -407,6 +407,7 @@ class ConvertibleBond(Base):
     outstanding_amount = Column(Float, comment="流通在外餘額（張）")
     is_active = Column(Boolean, default=True, comment="是否仍在交易")
     updated_at = Column(DateTime, default=datetime.now, comment="更新時間")
+    daily_checked_at = Column(DateTime, nullable=True, comment="每日資料最後檢查時間")
 
     __table_args__ = (
         Index("idx_cb_underlying", "underlying_stock_id"),
@@ -577,6 +578,9 @@ class DatabaseManager:
                     await conn.execute(text(
                         f"ALTER TABLE stock_update_tracker ADD COLUMN IF NOT EXISTS {col} TIMESTAMP"
                     ))
+                await conn.execute(text(
+                    "ALTER TABLE convertible_bond ADD COLUMN IF NOT EXISTS daily_checked_at TIMESTAMP"
+                ))
         except Exception:
             pass
 
@@ -2462,11 +2466,38 @@ class DatabaseManager:
 
         return {bid: pd.DataFrame(records) for bid, records in data_map.items()}
 
-    async def bulk_check_cb_needs_update(self, bond_ids: list[str]) -> dict[str, bool]:
-        """批次檢查哪些可轉債需要更新（DB 最新日期 < 今天）"""
+    async def bulk_check_cb_needs_update(
+        self, bond_ids: list[str], reference_date: Optional[date] = None
+    ) -> dict[str, bool]:
+        """批次檢查哪些可轉債需要更新
+
+        判斷邏輯：
+            1. daily_checked_at >= today → 不需要（今日已確認過）
+            2. DB 無 daily 資料 → 需要
+            3. DB 最新日期 < reference_date → 需要
+
+        Args:
+            bond_ids: CB 代碼列表
+            reference_date: 比較基準日期（api_latest_date），None 時 fallback 到 today
+        """
         if not bond_ids:
             return {}
         async with self.get_session() as session:
+            # 查詢 daily_checked_at
+            checked_result = await session.execute(
+                text("""
+                    SELECT bond_id, daily_checked_at
+                    FROM convertible_bond
+                    WHERE bond_id = ANY(:bond_ids)
+                """),
+                {"bond_ids": bond_ids},
+            )
+            checked_map = {
+                row._mapping["bond_id"]: row._mapping["daily_checked_at"]
+                for row in checked_result.fetchall()
+            }
+
+            # 查詢每支 CB 最新 daily 日期
             result = await session.execute(
                 text("""
                     SELECT bond_id, MAX(date) as latest_date
@@ -2479,17 +2510,39 @@ class DatabaseManager:
             rows = result.fetchall()
 
         latest_dates = {row._mapping["bond_id"]: row._mapping["latest_date"] for row in rows}
+        compare_date = reference_date or date.today()
         today = date.today()
         needs_update = {}
         for bid in bond_ids:
+            # 1. 今日已檢查 → 不需要
+            checked_at = checked_map.get(bid)
+            if checked_at and checked_at.date() >= today:
+                needs_update[bid] = False
+                continue
+            # 2. DB 無資料 → 需要
             if bid not in latest_dates:
                 needs_update[bid] = True
-            else:
-                db_date = latest_dates[bid]
-                if hasattr(db_date, "date"):
-                    db_date = db_date.date()
-                needs_update[bid] = db_date < today
+                continue
+            # 3. DB 日期 < 基準日期 → 需要
+            db_date = latest_dates[bid]
+            if hasattr(db_date, "date"):
+                db_date = db_date.date()
+            needs_update[bid] = db_date < compare_date
         return needs_update
+
+    async def bulk_update_cb_checked_at(self, bond_ids: list[str]):
+        """批次更新 CB 的 daily_checked_at"""
+        if not bond_ids:
+            return
+        async with self.get_session() as session:
+            await session.execute(
+                text("""
+                    UPDATE convertible_bond
+                    SET daily_checked_at = NOW()
+                    WHERE bond_id = ANY(:bond_ids)
+                """),
+                {"bond_ids": bond_ids},
+            )
 
     async def get_all_convertible_bonds(self, active_only: bool = True) -> list[dict]:
         """取得所有可轉債基本資訊"""

@@ -56,7 +56,10 @@ async def main():
 
     # 步驟 4: 可轉債套利分析 + 追加 CB sheet
     try:
-        signal_records, cb_score_map = await update_convertible_bonds(db_manager)
+        signal_records, cb_score_map = await update_convertible_bonds(
+            db_manager,
+            api_latest_date=getattr(all.db_manager, "api_latest_date", None),
+        )
 
         if signal_records and excel_path and os.path.exists(excel_path):
             bonds = await db_manager.get_all_convertible_bonds()
