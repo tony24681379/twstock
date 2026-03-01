@@ -342,11 +342,13 @@ export default function StockDetailPage() {
 
       {/* 技術指標子圖表 */}
       {chartData && calculatedIndicators && (
-        <IndicatorCharts
-          data={chartData.ohlcv}
-          indicators={calculatedIndicators}
-          darkMode={darkMode}
-        />
+        <div className="mb-6">
+          <IndicatorCharts
+            data={chartData.ohlcv}
+            indicators={calculatedIndicators}
+            darkMode={darkMode}
+          />
+        </div>
       )}
 
       {/* 基本資訊卡片 */}

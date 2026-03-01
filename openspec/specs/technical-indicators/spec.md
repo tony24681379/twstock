@@ -52,8 +52,12 @@
 
 #### Scenario: 計算 ADX/DMI
 - **WHEN** 計算趨勢強度指標
-- **THEN** 計算 +DI、-DI、ADX (Average Directional Index)
-- **USAGE** 判斷趨勢強度，ADX > 25 表示強趨勢
+- **THEN** 後端使用 talib 計算 ADX (timeperiod=14)、+DI (PLUS_DI)、-DI (MINUS_DI)
+- **THEN** +DI/-DI SHALL 存在記憶體 DataFrame 中，供訊號偵測使用
+- **THEN** 前端 SHALL 使用 `technicalindicators` npm 庫的 `ADX.calculate()` 即時計算
+- **THEN** 前端輸入：high、low、close 陣列及 period（預設 14）
+- **THEN** 前端輸出：adx（趨勢強度 0-100）、pdi（+DI）、mdi（-DI）
+- **USAGE** ADX > 25 表示強趨勢，+DI > -DI 表示上漲趨勢
 
 ### Requirement: 線差指標計算（向量化實現）
 系統 SHALL 使用向量化方式計算三線乖離和四線乖離指標。
@@ -102,10 +106,18 @@
   1. **空頭排列** (-15分): MA5 < MA10 < MA20
   2. **出貨訊號** (-10分): 價跌量增或價漲量縮
 
+#### Scenario: 計算 DMI 訊號（2 個）
+- **WHEN** ADX 和 +DI/-DI 指標已計算完成
+- **THEN** 計算以下 DMI 訊號：
+  1. **DMI向上** (+10分, State): ADX > 25 且 +DI > -DI（強趨勢且方向向上）
+  2. **DMI向下** (-10分, State): ADX > 25 且 -DI > +DI（強趨勢且方向向下）
+- **THEN** DMI 訊號 SHALL 為 State 型，每天驗證條件有效性
+- **THEN** `detect_all_signals()` 和 `validate_state_signals()` 兩處 SHALL 同時實作 DMI 偵測邏輯
+
 #### Scenario: 訊號強度標準化
 - **WHEN** 計算技術訊號總分
-- **THEN** 原始分數範圍：-30 ~ +60
-- **THEN** 標準化為 0-100 分：`(原始分數 + 30) / 90 * 100`
+- **THEN** 原始分數範圍：-182 ~ +184（crossover -52~+74, state -78~+90, extreme -52~+20）
+- **THEN** 標準化為 0-100 分：`(原始分數 + 182) / 366 * 100`
 - **RATIONALE** 統一評分標準，方便前端顯示和排序
 
 #### Scenario: 訊號品質評級
@@ -177,3 +189,36 @@
 - **THEN** 數據載入：490 天 → 90 天（減少 82% 載入量，5.4x 提升）
 - **THEN** 線差計算：Python 迴圈 → numpy 向量化（10-15x 提升）
 - **THEN** API 回應：2-3 秒 → 60-100 ms（詳情頁移除不必要欄位）
+
+### Requirement: 前端 ADX 圖表顯示
+前端 SHALL 在 K 線圖下方以獨立副圖顯示 ADX 指標。
+
+#### Scenario: ADX 切換按鈕
+- **WHEN** 使用者在指標切換列（IndicatorToggles）點擊 ADX 按鈕
+- **THEN** 啟用或停用 ADX 指標顯示
+- **THEN** 按鈕樣式 SHALL 與現有指標按鈕一致（啟用時顯示對應顏色）
+
+#### Scenario: ADX 副圖表渲染
+- **WHEN** ADX 指標已啟用且有足夠歷史數據
+- **THEN** 在副圖區域顯示 ADX 圖表（Recharts LineChart）
+- **THEN** 圖表高度 SHALL 為 120px（與 RSI、KD 圖表一致）
+- **THEN** 圖表 SHALL 顯示以下線條：
+  - ADX 線（趨勢強度）
+  - +DI 線（正向方向指標）
+  - -DI 線（負向方向指標）
+  - ADX = 25 參考虛線（強趨勢分界）
+- **THEN** Y 軸範圍 SHALL 為 0-100
+
+#### Scenario: ADX 資料不足處理
+- **WHEN** 歷史數據不足以計算 ADX（需約 28 個交易日暖機）
+- **THEN** 不足期間的值 SHALL 為 null
+- **THEN** 圖表 SHALL 僅顯示有值的區段（與其他指標行為一致）
+
+#### Scenario: ADX Tooltip 顯示
+- **WHEN** 使用者將滑鼠懸停在 ADX 圖表上
+- **THEN** Tooltip SHALL 顯示 ADX、+DI、-DI 的數值，格式化至小數點第二位
+- **THEN** 樣式 SHALL 與現有副圖 Tooltip 一致（支援 dark mode）
+
+#### Scenario: ADX 圖表與下方區塊間距
+- **WHEN** ADX 圖表（或任何副圖指標）顯示於頁面上
+- **THEN** 副圖區塊與下方基本資訊卡片之間 SHALL 有 `mb-6` 間距

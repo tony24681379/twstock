@@ -36,6 +36,7 @@ export const INDICATOR_CONFIG = {
   MA20: { name: "MA20 (20日均線)", color: "#FFE66D" },
   MA60: { name: "MA60 (60日均線)", color: "#A8DADC" },
   BB: { name: "布林通道", color: "#EC4899" },
+  ADX: { name: "ADX (趨勢強度)", color: "#14B8A6" },
 } as const
 
 /**

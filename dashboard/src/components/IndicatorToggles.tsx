@@ -10,6 +10,7 @@ export default function IndicatorToggles({ enabled, onChange }: IndicatorToggles
     { value: 'KD', label: 'KD', color: 'bg-green-500' },
     { value: 'RSI', label: 'RSI', color: 'bg-orange-500' },
     { value: 'BB', label: '布林通道', color: 'bg-pink-500' },
+    { value: 'ADX', label: 'ADX', color: 'bg-teal-500' },
   ]
 
   const toggleIndicator = (value: string) => {

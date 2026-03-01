@@ -89,23 +89,22 @@ class VectorizedIndicatorEngine:
             lambda x: talib.RSI(x.values, timeperiod=14)
         )
 
-        # ✅ 批次計算 ADX（Average Directional Index）
-        def calc_adx(group):
-            """計算 ADX 指標"""
-            adx = talib.ADX(
-                group['high'].values,
-                group['low'].values,
-                group['close'].values,
-                timeperiod=14
-            )
-            return pd.Series(adx, index=group.index, name='adx')
+        # ✅ 批次計算 ADX / +DI / -DI
+        def calc_adx_dmi(group):
+            high = group['high'].values
+            low = group['low'].values
+            close = group['close'].values
+            adx = talib.ADX(high, low, close, timeperiod=14)
+            plus_di = talib.PLUS_DI(high, low, close, timeperiod=14)
+            minus_di = talib.MINUS_DI(high, low, close, timeperiod=14)
+            return pd.DataFrame({
+                'adx': adx,
+                'plus_di': plus_di,
+                'minus_di': minus_di,
+            }, index=group.index)
 
-        adx_series = df.groupby('stock_id', group_keys=False).apply(calc_adx, include_groups=False)
-        if isinstance(adx_series, pd.DataFrame):
-            # 如果返回 DataFrame，提取第一列
-            df['adx'] = adx_series.iloc[:, 0]
-        else:
-            df['adx'] = adx_series
+        adx_dmi_data = df.groupby('stock_id', group_keys=False).apply(calc_adx_dmi, include_groups=False)
+        df[['adx', 'plus_di', 'minus_di']] = adx_dmi_data
 
         # ✅ 批次計算布林通道（Bollinger Bands）
         def calc_bollinger(group):

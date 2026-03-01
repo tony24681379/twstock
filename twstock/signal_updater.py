@@ -594,8 +594,8 @@ class SignalUpdater:
                 buy_signals = sum(1 for s in valid_signals if s.score > 0)
                 sell_signals = sum(1 for s in valid_signals if s.score < 0)
 
-                # 標準化分數（-172 ~ +174 → 0 ~ 100）
-                normalized_score = int(((raw_score + 172) / 346) * 100)
+                # 標準化分數（-182 ~ +184 → 0 ~ 100）
+                normalized_score = int(((raw_score + 182) / 366) * 100)
 
                 # 建立 signals_detail JSON
                 signals_detail = []

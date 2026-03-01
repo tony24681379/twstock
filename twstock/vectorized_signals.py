@@ -104,12 +104,14 @@ SIGNAL_TYPE_MAP = {
     "連續跌停": SIGNAL_TYPE_CROSSOVER,  # 連續2天以上跌停
     "跌停爆量": SIGNAL_TYPE_CROSSOVER,  # 跌停+成交量>20日均量×2
     "跌停開板": SIGNAL_TYPE_CROSSOVER,  # 盤中跌停後開板
-    # === 狀態型訊號（9個）- 持續驗證有效性 ===
+    # === 狀態型訊號（11個）- 持續驗證有效性 ===
     "三線合一向上": SIGNAL_TYPE_STATE,  # MA5/10/20 糾結後向上穿破
     "三線合一向下": SIGNAL_TYPE_STATE,  # MA5/10/20 糾結後向下穿破
     "四線合一向上": SIGNAL_TYPE_STATE,  # MA5/10/20/60 全部向上
     "四線合一向下": SIGNAL_TYPE_STATE,  # MA5/10/20/60 全部向下
     "MACD多頭": SIGNAL_TYPE_STATE,  # MACD和信號線>0且上升
+    "DMI向上": SIGNAL_TYPE_STATE,  # ADX>25 且 +DI>-DI
+    "DMI向下": SIGNAL_TYPE_STATE,  # ADX>25 且 -DI>+DI
     "多頭排列": SIGNAL_TYPE_STATE,  # MA5 > MA10 > MA20
     "空頭排列": SIGNAL_TYPE_STATE,  # MA5 < MA10 < MA20
     "創60日新高": SIGNAL_TYPE_STATE,  # 收盤價 >= 60日最高
@@ -307,9 +309,29 @@ class VectorizedSignalDetector:
             )
         )
 
-        # 11-12. DMI 訊號需要 +DI 和 -DI，這需要額外計算
-        # 暫時跳過，因為 VectorizedIndicatorEngine 沒有計算這些指標
-        # TODO: 在 VectorizedIndicatorEngine 中添加 DMI 計算
+        # 11. DMI向上（ADX > 25 且 +DI > -DI，強上漲趨勢）
+        has_dmi = "plus_di" in latest.columns and latest["plus_di"].notna().any()
+        if has_dmi:
+            dmi_up = (
+                (latest["adx"] > 25)
+                & (latest["plus_di"] > latest["minus_di"])
+            )
+            signal_results.append(
+                latest[dmi_up][["stock_id", "date"]].assign(
+                    signal_name="DMI向上", triggered=True, score=SignalScore.DMI_UP
+                )
+            )
+
+            # 12. DMI向下（ADX > 25 且 -DI > +DI，強下跌趨勢）
+            dmi_down = (
+                (latest["adx"] > 25)
+                & (latest["minus_di"] > latest["plus_di"])
+            )
+            signal_results.append(
+                latest[dmi_down][["stock_id", "date"]].assign(
+                    signal_name="DMI向下", triggered=True, score=SignalScore.DMI_DOWN
+                )
+            )
 
         # ========== 布林帶訊號 (1 個) ==========
 
@@ -643,11 +665,11 @@ class VectorizedSignalDetector:
             .reset_index()
         )
 
-        # 正規化到 0-100（理論範圍 -172 到 +174）
-        # crossover(-52) + state(-68) + extreme(-52) = -172
-        # crossover(+74) + state(+80) + extreme(+20) = +174
-        min_score = -172
-        max_score = 174
+        # 正規化到 0-100（理論範圍 -182 到 +184）
+        # crossover(-52) + state(-78) + extreme(-52) = -182
+        # crossover(+74) + state(+90) + extreme(+20) = +184
+        min_score = -182
+        max_score = 184
 
         strength["normalized_score"] = (
             (((strength["raw_score"] - min_score) / (max_score - min_score)) * 100)
@@ -1139,7 +1161,7 @@ class VectorizedSignalDetector:
         # 取得所有股票ID
         all_stock_ids = latest["stock_id"].unique()
 
-        # ========== 9 個狀態型訊號 ==========
+        # ========== 11 個狀態型訊號 ==========
 
         # 1. 多頭排列（MA5 > MA10 > MA20）
         signal_name = "多頭排列"
@@ -1608,5 +1630,98 @@ class VectorizedSignalDetector:
                         "is_valid": False,
                     }
                 )
+
+        # 10-11. DMI向上/向下（ADX > 25 且 +DI/-DI 方向）
+        has_dmi = "plus_di" in latest.columns and latest["plus_di"].notna().any()
+        if has_dmi:
+            # 10. DMI向上
+            signal_name = "DMI向上"
+            dmi_up = (latest["adx"] > 25) & (latest["plus_di"] > latest["minus_di"])
+
+            for stock_id in all_stock_ids:
+                stock_latest = latest[latest["stock_id"] == stock_id].iloc[0]
+                is_valid = dmi_up[latest["stock_id"] == stock_id].iloc[0]
+
+                existing = None
+                if history_df is not None and not history_df.empty:
+                    existing_records = history_df[
+                        (history_df["stock_id"] == stock_id)
+                        & (history_df["signal_name"] == signal_name)
+                    ]
+                    if not existing_records.empty:
+                        existing = existing_records.iloc[-1]
+
+                if is_valid:
+                    trigger_date = (
+                        existing["trigger_date"] if existing is not None else stock_latest["date"]
+                    )
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.DMI_UP,
+                            "trigger_date": trigger_date,
+                            "last_valid_date": stock_latest["date"],
+                            "is_valid": True,
+                        }
+                    )
+                elif existing is not None:
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.DMI_UP,
+                            "trigger_date": existing["trigger_date"],
+                            "last_valid_date": existing.get("last_valid_date"),
+                            "is_valid": False,
+                        }
+                    )
+
+            # 11. DMI向下
+            signal_name = "DMI向下"
+            dmi_down = (latest["adx"] > 25) & (latest["minus_di"] > latest["plus_di"])
+
+            for stock_id in all_stock_ids:
+                stock_latest = latest[latest["stock_id"] == stock_id].iloc[0]
+                is_valid = dmi_down[latest["stock_id"] == stock_id].iloc[0]
+
+                existing = None
+                if history_df is not None and not history_df.empty:
+                    existing_records = history_df[
+                        (history_df["stock_id"] == stock_id)
+                        & (history_df["signal_name"] == signal_name)
+                    ]
+                    if not existing_records.empty:
+                        existing = existing_records.iloc[-1]
+
+                if is_valid:
+                    trigger_date = (
+                        existing["trigger_date"] if existing is not None else stock_latest["date"]
+                    )
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.DMI_DOWN,
+                            "trigger_date": trigger_date,
+                            "last_valid_date": stock_latest["date"],
+                            "is_valid": True,
+                        }
+                    )
+                elif existing is not None:
+                    validated_signals.append(
+                        {
+                            "stock_id": stock_id,
+                            "signal_name": signal_name,
+                            "signal_type": SIGNAL_TYPE_STATE,
+                            "score": SignalScore.DMI_DOWN,
+                            "trigger_date": existing["trigger_date"],
+                            "last_valid_date": existing.get("last_valid_date"),
+                            "is_valid": False,
+                        }
+                    )
 
         return pd.DataFrame(validated_signals)

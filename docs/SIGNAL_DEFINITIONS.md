@@ -9,7 +9,7 @@
 
 ---
 
-## 一、技術訊號（27 個）
+## 一、技術訊號（29 個）
 
 實作檔案：`twstock/vectorized_signals.py`
 
@@ -33,7 +33,7 @@
 
 Crossover 理論範圍：**-52 ~ +74**
 
-### 1.2 State 訊號（9 個）
+### 1.2 State 訊號（11 個）
 
 狀態型，每天驗證條件，失效立即移除。
 
@@ -44,12 +44,14 @@ Crossover 理論範圍：**-52 ~ +74**
 | 3 | 四線合一向上 | +18 | `FOUR_LINE_UP` | MA5/10/20/60 全部向上且遞增排列 |
 | 4 | 四線合一向下 | -18 | `FOUR_LINE_DOWN` | MA5/10/20/60 全部向下且遞減排列 |
 | 5 | MACD多頭 | +12 | `MACD_BULLISH` | MACD>0, Signal>0, 且兩者上升 |
-| 6 | 多頭排列 | +18 | `BULLISH_ALIGNMENT` | MA5 > MA10 > MA20 |
-| 7 | 空頭排列 | -18 | `BEARISH_ALIGNMENT` | MA5 < MA10 < MA20 |
-| 8 | 創60日新高 | +12 | `NEW_HIGH_60` | 收盤價 >= 60日最高價 |
-| 9 | 創60日新低 | -12 | `NEW_LOW_60` | 收盤價 <= 60日最低價 |
+| 6 | DMI向上 | +10 | `DMI_UP` | ADX > 25 且 +DI > -DI（強上漲趨勢） |
+| 7 | DMI向下 | -10 | `DMI_DOWN` | ADX > 25 且 -DI > +DI（強下跌趨勢） |
+| 8 | 多頭排列 | +18 | `BULLISH_ALIGNMENT` | MA5 > MA10 > MA20 |
+| 9 | 空頭排列 | -18 | `BEARISH_ALIGNMENT` | MA5 < MA10 < MA20 |
+| 10 | 創60日新高 | +12 | `NEW_HIGH_60` | 收盤價 >= 60日最高價 |
+| 11 | 創60日新低 | -12 | `NEW_LOW_60` | 收盤價 <= 60日最低價 |
 
-State 理論範圍：**-68 ~ +80**
+State 理論範圍：**-78 ~ +90**
 
 ### 1.3 極端事件訊號（8 個）
 
@@ -72,8 +74,8 @@ State 理論範圍：**-68 ~ +80**
 ### 1.4 正規化公式
 
 ```
-理論範圍：-172 ~ +174（crossover + state + extreme）
-normalized = ((raw_score + 172) / 346) * 100
+理論範圍：-182 ~ +184（crossover + state + extreme）
+normalized = ((raw_score + 182) / 366) * 100
 clamp 到 [0, 100]
 ```
 
@@ -82,11 +84,6 @@ clamp 到 [0, 100]
 - `twstock/signal_updater.py` — `_update_signal_cache()`
 - `api/services/stock_service.py` — `StockService.normalize_technical_score()`
 - `twstock/stock_list_cache_updater.py` — 間接呼叫 `StockService.normalize_technical_score()`
-
-### 1.5 未實作的訊號
-
-以下在 `SignalScore` 中定義但無偵測邏輯：
-- `DMI_UP` (+10) / `DMI_DOWN` (-10) — 缺少 +DI/-DI 指標計算
 
 ---
 
@@ -272,3 +269,4 @@ overall = chip_normalized * chip_weight
 | 2026-02-17 | 建立本文件 | 作為訊號定義的唯一權威來源，防止分數被隨意修改 |
 | 2026-02-17 | 新增「四、可轉債套利訊號」章節；`underlying_strength` 預設值從 50 改為 None；新增 TWSE/TPEX Open Data 補齊標的股收盤價 | CB 訊號定義缺乏文件記錄；strength=50 卡邊界導致低溢價率永遠不觸發；未追蹤標的股缺收盤價 |
 | 2026-02-21 | 基本面訊號從 10 個擴充為 19 個：新增營收訊號 5 個、股利訊號 2 個、PSR 訊號 2 個；正規化公式從 (-73,+93)/166 改為 (-120,+148)/268；新增 `stock_dividend` 表存儲歷史股利；新增 EPS 預測功能（不參與訊號評分） | 營收資料有蒐集但未產生訊號（0 個）；股利只存最新一年無法追蹤趨勢；估值指標僅有 PER |
+| 2026-03-01 | 實作 DMI 訊號（DMI向上 +10、DMI向下 -10），技術訊號從 27 個增為 29 個；vectorized_indicators 新增 +DI/-DI 計算；正規化公式從 (-172,+174)/346 改為 (-182,+184)/366；移除「未實作的訊號」章節 | DMI_UP/DMI_DOWN 分數已定義但偵測邏輯為 TODO |

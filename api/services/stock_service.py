@@ -128,17 +128,17 @@ class StockService:
     @staticmethod
     def normalize_technical_score(raw_score: int) -> int:
         """
-        標準化技術訊號分數（-172~+174 → 0~100）
+        標準化技術訊號分數（-182~+184 → 0~100）
 
         Args:
-            raw_score: 原始分數（-172~+174）
+            raw_score: 原始分數（-182~+184）
 
         Returns:
             標準化分數（0~100）
         """
-        # 將 -172~+174 映射到 0~100
-        # 公式：((raw_score + 172) / 346) * 100
-        normalized = ((raw_score + 172) / 346) * 100
+        # 將 -182~+184 映射到 0~100
+        # 公式：((raw_score + 182) / 366) * 100
+        normalized = ((raw_score + 182) / 366) * 100
         return int(max(0, min(100, normalized)))
 
     @staticmethod

@@ -7,6 +7,7 @@ interface IndicatorChartsProps {
     KD?: { k: (number | null)[]; d: (number | null)[] }
     RSI?: (number | null)[]
     BB?: { upper: (number | null)[]; middle: (number | null)[]; lower: (number | null)[] }
+    ADX?: { adx: (number | null)[]; pdi: (number | null)[]; mdi: (number | null)[] }
   }
   darkMode?: boolean
 }
@@ -21,6 +22,9 @@ export default function IndicatorCharts({ data, indicators, darkMode = false }: 
     k: indicators.KD?.k[index],
     d: indicators.KD?.d[index],
     rsi: indicators.RSI?.[index],
+    adx: indicators.ADX?.adx[index],
+    pdi: indicators.ADX?.pdi[index],
+    mdi: indicators.ADX?.mdi[index],
   }))
 
   const gridColor = darkMode ? '#374151' : '#E5E7EB'
@@ -95,6 +99,28 @@ export default function IndicatorCharts({ data, indicators, darkMode = false }: 
               {/* 超買超賣線 */}
               <Line type="monotone" dataKey={() => 80} stroke="#EF4444" strokeDasharray="5 5" dot={false} name="超買 80" />
               <Line type="monotone" dataKey={() => 20} stroke="#10B981" strokeDasharray="5 5" dot={false} name="超賣 20" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* ADX 圖表 */}
+      {indicators.ADX && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">ADX（趨勢強度指標）</h4>
+          <ResponsiveContainer width="100%" height={120}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+              <XAxis dataKey="time" stroke={textColor} tick={{ fontSize: 12 }} />
+              <YAxis domain={[0, 100]} stroke={textColor} tick={{ fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}` }}
+                formatter={(value: number) => value?.toFixed(2)}
+              />
+              <Line type="monotone" dataKey="adx" stroke="#14B8A6" strokeWidth={2} dot={false} name="ADX" />
+              <Line type="monotone" dataKey="pdi" stroke="#3B82F6" strokeWidth={1.5} dot={false} name="+DI" />
+              <Line type="monotone" dataKey="mdi" stroke="#EF4444" strokeWidth={1.5} dot={false} name="-DI" />
+              <Line type="monotone" dataKey={() => 25} stroke="#9CA3AF" strokeDasharray="5 5" dot={false} name="強趨勢 25" />
             </LineChart>
           </ResponsiveContainer>
         </div>
