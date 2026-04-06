@@ -1881,10 +1881,13 @@ class DatabaseManager:
         elif isinstance(latest_date, datetime):
             latest_date = latest_date.date()
 
-        # 檢查追蹤狀態，如果最近已經檢查過且 API 沒有更新資料，就不重複更新
+        # 如果有 API 最新日期，直接比較（與 bulk_check_needs_update 一致）
+        if self.api_latest_date:
+            return latest_date < self.api_latest_date
+
+        # 沒有 API 最新日期時，檢查追蹤狀態
         tracker = await self.get_tracker(stock_id)
         if tracker:
-            # 如果今天已經檢查過且最新日期沒變，就不需要重新更新
             last_checked = tracker.get("last_checked_at")
             daily_last_date = tracker.get("daily_last_date")
 
@@ -1894,7 +1897,6 @@ class DatabaseManager:
                 and daily_last_date
                 and daily_last_date.date() == latest_date
             ):
-                # 今天已經檢查過且日期一致，不需要更新
                 return False
 
         # 檢查是否需要更新（考慮交易日）
